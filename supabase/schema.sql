@@ -72,3 +72,72 @@ from public.subjects s
 left join public.attendance_logs l
   on l.subject_id = s.id and l.user_id = s.user_id
 group by s.id, s.user_id, s.initial_present, s.initial_total;
+
+-- Triggers
+
+create function public.set_updated_at()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+create trigger profiles_set_updated_at before update on public.profiles
+  for each row execute function public.set_updated_at();
+create trigger subjects_set_updated_at before update on public.subjects
+  for each row execute function public.set_updated_at();
+create trigger attendance_logs_set_updated_at before update on public.attendance_logs
+  for each row execute function public.set_updated_at();
+
+create function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.profiles (id, full_name)
+  values (new.id, left(coalesce(new.raw_user_meta_data ->> 'full_name', ''), 80))
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- Row Level Security
+
+alter table public.profiles enable row level security;
+alter table public.subjects enable row level security;
+alter table public.timetable_slots enable row level security;
+alter table public.attendance_logs enable row level security;
+
+create policy "profiles_select_own" on public.profiles
+  for select to authenticated using ((select auth.uid()) = id);
+create policy "profiles_insert_own" on public.profiles
+  for insert to authenticated with check ((select auth.uid()) = id);
+create policy "profiles_update_own" on public.profiles
+  for update to authenticated
+  using ((select auth.uid()) = id) with check ((select auth.uid()) = id);
+
+create policy "subjects_own" on public.subjects
+  for all to authenticated
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy "timetable_slots_own" on public.timetable_slots
+  for all to authenticated
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy "attendance_logs_own" on public.attendance_logs
+  for all to authenticated
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+
+-- Grants (required: new tables are not exposed to the Data API automatically)
+
+grant select, insert, update on public.profiles to authenticated;
+grant select, insert, update, delete
+  on public.subjects, public.timetable_slots, public.attendance_logs to authenticated;
+grant select on public.subject_stats to authenticated;
