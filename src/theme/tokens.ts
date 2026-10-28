@@ -2,18 +2,33 @@ export const colors = {
   bg: '#F5F4F0',
   surface: '#FFFFFF',
   surfaceMuted: '#ECEBE6',
+  surfacePressed: '#ECEBE6',
+  surfaceMutedPressed: '#E2E0D8',
   border: '#DAD8D0',
   text: '#16181A',
+  textPressed: '#2B2F34',
   textMuted: '#5B6066',
   accent: '#0B6E66',
   accentSoft: '#E2F1EF',
+  accentPressed: '#085852',
   onAccent: '#FFFFFF',
   safe: '#1B7A3E',
+  safePressed: '#156231',
   safeBg: '#E4F3E8',
   warn: '#8A5200',
   warnBg: '#FBEFD6',
   danger: '#B42318',
+  dangerPressed: '#941B12',
   dangerBg: '#FCE7E4',
+  rippleNeutral: 'rgba(22, 24, 26, 0.08)',
+  rippleAccent: 'rgba(11, 110, 102, 0.14)',
+  rippleOnAccent: 'rgba(255, 255, 255, 0.22)',
+} as const;
+
+export const motion = {
+  pressIn: 90,
+  pressOut: 160,
+  transition: 180,
 } as const;
 
 export const radius = {
