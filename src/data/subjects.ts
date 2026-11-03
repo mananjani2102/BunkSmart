@@ -8,12 +8,24 @@ import {
 
 const SUBJECT_COLUMNS =
   'id, user_id, name, target_percent, initial_present, initial_total, created_at, updated_at';
+const SUBJECT_STATS_COLUMNS =
+  'subject_id, user_id, attended, conducted, cancelled';
+
 export async function fetchSubjects(): Promise<Subject[]> {
   const result = await supabase
     .from('subjects')
     .select(SUBJECT_COLUMNS)
     .order('name', { ascending: true })
     .overrideTypes<Subject[], { merge: false }>();
+
+  return unwrapData(result);
+}
+
+export async function fetchSubjectStats(): Promise<SubjectStats[]> {
+  const result = await supabase
+    .from('subject_stats')
+    .select(SUBJECT_STATS_COLUMNS)
+    .overrideTypes<SubjectStats[], { merge: false }>();
 
   return unwrapData(result);
 }
@@ -66,5 +78,10 @@ export async function updateSubject(
 
 export async function deleteSubject(id: string): Promise<void> {
   const result = await supabase.from('subjects').delete().eq('id', id);
+  assertNoError(result);
+}
+
+export async function deleteAllSubjects(userId: string): Promise<void> {
+  const result = await supabase.from('subjects').delete().eq('user_id', userId);
   assertNoError(result);
 }
