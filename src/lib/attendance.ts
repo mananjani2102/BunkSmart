@@ -109,3 +109,138 @@ export function combineCounts(
 
   return { attended, held };
 }
+
+export function getPercentTenths(
+  attended: number,
+  held: number
+): number | null {
+  const a = normalizeNonNegativeInt(attended);
+  const h = normalizeNonNegativeInt(held);
+
+  if (h === 0) {
+    return null;
+  }
+
+  return Math.floor((a * 1000) / h);
+}
+
+export function formatDisplayPercent(attended: number, held: number): string {
+  const tenths = getPercentTenths(attended, held);
+  if (tenths === null) {
+    return 'No data';
+  }
+
+  const whole = Math.floor(tenths / 10);
+  const tenth = tenths % 10;
+  return tenth === 0 ? `${whole}%` : `${whole}.${tenth}%`;
+}
+
+export function formatPercentSpoken(attended: number, held: number): string {
+  const tenths = getPercentTenths(attended, held);
+  if (tenths === null) {
+    return 'no data';
+  }
+
+  const whole = Math.floor(tenths / 10);
+  const tenth = tenths % 10;
+  return tenth === 0 ? `${whole} percent` : `${whole}.${tenth} percent`;
+}
+
+export function formatPointsChange(
+  currentTenths: number | null,
+  projectedTenths: number | null
+): string | null {
+  if (currentTenths === null || projectedTenths === null) {
+    return null;
+  }
+
+  const diff = projectedTenths - currentTenths;
+  if (diff === 0) {
+    return '0 points';
+  }
+
+  const sign = diff > 0 ? '+' : '-';
+  const abs = Math.abs(diff);
+  const whole = Math.floor(abs / 10);
+  const tenth = abs % 10;
+  const formatted = tenth === 0 ? `${whole}` : `${whole}.${tenth}`;
+  return `${sign}${formatted} points`;
+}
+
+export function getAttendanceRatio(
+  attended: number,
+  held: number
+): number | null {
+  const a = normalizeNonNegativeInt(attended);
+  const h = normalizeNonNegativeInt(held);
+
+  if (h === 0) {
+    return null;
+  }
+
+  return (a * 100) / h;
+}
+
+export function getAttendanceLevel(
+  attended: number,
+  held: number,
+  target: number
+): AttendanceLevel {
+  const h = normalizeNonNegativeInt(held);
+  if (h === 0) {
+    return 'no_data';
+  }
+
+  const t = clampTarget(target);
+  if (!meetsTarget(attended, h, t)) {
+    return 'below';
+  }
+
+  if (canSkip(attended, h, t) <= 1) {
+    return 'borderline';
+  }
+
+  return 'safe';
+}
+
+export function levelToTone(level: AttendanceLevel): AttendanceTone {
+  switch (level) {
+    case 'safe':
+      return 'safe';
+    case 'borderline':
+      return 'warn';
+    case 'below':
+      return 'danger';
+    case 'no_data':
+      return 'muted';
+  }
+}
+
+export function pluralizeClasses(count: number): string {
+  return count === 1 ? 'class' : 'classes';
+}
+
+export function getInsightText(
+  attended: number,
+  held: number,
+  target: number
+): string {
+  const h = normalizeNonNegativeInt(held);
+  const t = clampTarget(target);
+
+  if (h === 0) {
+    return 'No classes counted yet. Mark attendance to see your skip limit.';
+  }
+
+  if (!meetsTarget(attended, h, t)) {
+    const needed = mustAttend(attended, h, t);
+    return `Below ${t}%. Attend the next ${needed} ${pluralizeClasses(needed)} in a row to reach ${t}%.`;
+  }
+
+  const skipAllowance = canSkip(attended, h, t);
+  if (skipAllowance === 0) {
+    return `On target with no margin. Missing the next class puts you below ${t}%.`;
+  }
+
+  return `You can skip ${skipAllowance} more ${pluralizeClasses(skipAllowance)} and stay at or above ${t}%.`;
+}
