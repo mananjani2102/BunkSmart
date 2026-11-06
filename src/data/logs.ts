@@ -24,6 +24,21 @@ export async function fetchLogsForDate(
   return unwrapData(result);
 }
 
+export async function fetchLogsForSubject(
+  subjectId: string
+): Promise<AttendanceLog[]> {
+  const result = await supabase
+    .from('attendance_logs')
+    .select(LOG_COLUMNS)
+    .eq('subject_id', subjectId)
+    .order('log_date', { ascending: true })
+    .order('created_at', { ascending: true })
+    .limit(1000)
+    .overrideTypes<AttendanceLog[], { merge: false }>();
+
+  return unwrapData(result);
+}
+
 export async function setSlotLogStatus(
   input: SetSlotLogInput
 ): Promise<AttendanceLog> {
