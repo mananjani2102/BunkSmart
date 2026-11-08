@@ -5,9 +5,11 @@ import {
   useFocusEffect,
   useLocalSearchParams,
 } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { HistoryList } from '@/components/HistoryList';
+import { TrendChart } from '@/components/TrendChart';
 import { WhatIfSimulator } from '@/components/WhatIfSimulator';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
@@ -19,6 +21,7 @@ import { ProgressRing } from '@/components/ui/ProgressRing';
 import { Screen } from '@/components/ui/Screen';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useData } from '@/context/DataProvider';
+import { fetchLogsForSubject } from '@/data/logs';
 import {
   clampTarget,
   formatDisplayPercent,
@@ -28,9 +31,13 @@ import {
   getInsightText,
   levelToTone,
 } from '@/lib/attendance';
+import { AppError, getFriendlyErrorMessage } from '@/lib/errors';
 import { colors, radius, spacing } from '@/theme/tokens';
+import { type AttendanceLog } from '@/types/db';
 
 const DETAIL_EDGES = ['bottom', 'left', 'right'] as const;
+
+type LogsStatus = 'loading' | 'ready' | 'error';
 
 export default function SubjectDetailScreen() {
   const params = useLocalSearchParams<{ id?: string }>();
@@ -48,13 +55,62 @@ export default function SubjectDetailScreen() {
     subjectId && subjects.some((item) => item.id === subjectId)
   );
 
+  const [prevSubjectId, setPrevSubjectId] = useState<string | undefined>(
+    subjectId
+  );
+  const [logs, setLogs] = useState<AttendanceLog[]>([]);
+  const [logsStatus, setLogsStatus] = useState<LogsStatus>('loading');
+  const [logsError, setLogsError] = useState<string | null>(null);
+
+  if (prevSubjectId !== subjectId) {
+    setPrevSubjectId(subjectId);
+    setLogs([]);
+    setLogsStatus('loading');
+    setLogsError(null);
+  }
+
+  const mountedRef = useRef(true);
+  const fetchIdRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const loadSubjectLogs = useCallback(async (targetSubjectId: string) => {
+    const requestId = ++fetchIdRef.current;
+    setLogsStatus('loading');
+    setLogsError(null);
+
+    try {
+      const rows = await fetchLogsForSubject(targetSubjectId);
+      if (!mountedRef.current || fetchIdRef.current !== requestId) {
+        return;
+      }
+      setLogs(rows);
+      setLogsStatus('ready');
+    } catch (err) {
+      if (!mountedRef.current || fetchIdRef.current !== requestId) {
+        return;
+      }
+      if (!(err instanceof AppError)) {
+        console.error('Fetch subject logs failed:', err);
+      }
+      setLogsError(getFriendlyErrorMessage(err));
+      setLogsStatus('error');
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       if (!subjectId || !hasSubject) {
         return;
       }
       void reloadStats();
-    }, [subjectId, hasSubject, reloadStats])
+      void loadSubjectLogs(subjectId);
+    }, [subjectId, hasSubject, reloadStats, loadSubjectLogs])
   );
 
   const openEditSubject = () => {
@@ -74,6 +130,23 @@ export default function SubjectDetailScreen() {
               <Skeleton width={140} height={140} />
               <Skeleton width={88} height={24} />
             </View>
+            <View style={styles.metaRow}>
+              <Skeleton width={180} height={18} />
+              <Skeleton width={140} height={14} />
+            </View>
+            <Skeleton width="100%" height={48} />
+          </Card>
+
+          <Card style={styles.skeletonCard}>
+            <Skeleton width="55%" height={20} />
+            <Skeleton width="100%" height={44} />
+            <Skeleton width="100%" height={44} />
+            <Skeleton width="100%" height={48} />
+          </Card>
+
+          <Card style={styles.skeletonCard}>
+            <Skeleton width="50%" height={20} />
+            <Skeleton width="100%" height={140} />
           </Card>
         </View>
       </Screen>
@@ -114,6 +187,7 @@ export default function SubjectDetailScreen() {
   const stats = statsBySubject[subject.id];
   const attended = stats?.attended ?? subject.initial_present;
   const held = stats?.conducted ?? subject.initial_total;
+  const absent = Math.max(0, held - attended);
   const cancelled = stats?.cancelled ?? 0;
   const target = clampTarget(subject.target_percent);
 
@@ -187,6 +261,79 @@ export default function SubjectDetailScreen() {
         counts={{ attended, held }}
         slots={slots}
       />
+
+      <Card style={styles.countsCard}>
+        <AppText variant="heading">Class totals</AppText>
+        <View style={styles.countsRow}>
+          <View style={styles.countTile}>
+            <View style={styles.countLabelRow}>
+              <View style={[styles.countDot, { backgroundColor: colors.safe }]} />
+              <AppText variant="caption" tone="muted" numberOfLines={1}>
+                Present
+              </AppText>
+            </View>
+            <AppText variant="heading" tone="safe" style={styles.countValue}>
+              {attended}
+            </AppText>
+          </View>
+
+          <View style={styles.countTile}>
+            <View style={styles.countLabelRow}>
+              <View style={[styles.countDot, { backgroundColor: colors.danger }]} />
+              <AppText variant="caption" tone="muted" numberOfLines={1}>
+                Absent
+              </AppText>
+            </View>
+            <AppText variant="heading" tone="danger" style={styles.countValue}>
+              {absent}
+            </AppText>
+          </View>
+
+          <View style={styles.countTile}>
+            <View style={styles.countLabelRow}>
+              <View
+                style={[styles.countDot, { backgroundColor: colors.textMuted }]}
+              />
+              <AppText variant="caption" tone="muted" numberOfLines={1}>
+                Cancelled
+              </AppText>
+            </View>
+            <AppText variant="heading" tone="muted" style={styles.countValue}>
+              {cancelled}
+            </AppText>
+          </View>
+        </View>
+      </Card>
+
+      {logsStatus === 'loading' ? (
+        <View
+          accessible
+          accessibilityLabel="Loading attendance history"
+          style={styles.skeletonStack}
+        >
+          <Card style={styles.skeletonCard}>
+            <Skeleton width="50%" height={20} />
+            <Skeleton width="100%" height={150} />
+          </Card>
+          <Card style={styles.skeletonCard}>
+            <Skeleton width="35%" height={20} />
+            <Skeleton width="100%" height={48} />
+            <Skeleton width="100%" height={48} />
+          </Card>
+        </View>
+      ) : logsStatus === 'error' ? (
+        <ErrorState
+          message={logsError ?? 'Something went wrong. Try again.'}
+          onRetry={() => {
+            void loadSubjectLogs(subject.id);
+          }}
+        />
+      ) : (
+        <>
+          <TrendChart subject={subject} logs={logs} />
+          <HistoryList logs={logs} slots={slots} />
+        </>
+      )}
     </Screen>
   );
 }
