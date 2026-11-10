@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Link } from 'expo-router';
+import { Link, router } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 
@@ -259,6 +260,33 @@ export default function SignUpScreen() {
             style={styles.submitButton}
           />
 
+          <AppText variant="caption" tone="muted" style={styles.legalNotice}>
+            By creating an account you agree to the{' '}
+            <Text
+              accessibilityRole="link"
+              onPress={() => {
+                if (!submitting) {
+                  router.push('/legal/terms');
+                }
+              }}
+              style={styles.inlineLink}
+            >
+              Terms and Conditions
+            </Text>{' '}
+            and{' '}
+            <Text
+              accessibilityRole="link"
+              onPress={() => {
+                if (!submitting) {
+                  router.push('/legal/privacy');
+                }
+              }}
+              style={styles.inlineLink}
+            >
+              Privacy Policy
+            </Text>
+            .
+          </AppText>
         </View>
 
         <View style={styles.footer}>
