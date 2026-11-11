@@ -1,14 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 
+import { RemindersCard } from '@/components/RemindersCard';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Screen } from '@/components/ui/Screen';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { Stepper } from '@/components/ui/Stepper';
+import { CONTACT_EMAIL } from '@/constants/legal';
 import { useAuth } from '@/context/AuthProvider';
+import { useData } from '@/context/DataProvider';
 import { AppError, getFriendlyErrorMessage } from '@/lib/errors';
 import { colors, radius, spacing } from '@/theme/tokens';
 
@@ -28,14 +33,17 @@ function getUserInitials(name: string, email: string): string {
 
 export default function ProfileScreen() {
   const { user, profile, signOut, updateProfile } = useAuth();
+  const { deleteAllAttendanceData } = useData();
 
   const [signingOut, setSigningOut] = useState(false);
   const [savingTarget, setSavingTarget] = useState(false);
+  const [deletingData, setDeletingData] = useState(false);
   const [pendingTarget, setPendingTarget] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const signingOutRef = useRef(false);
   const savingTargetRef = useRef(false);
+  const deletingDataRef = useRef(false);
 
   const metadataName =
     typeof user?.user_metadata?.full_name === 'string'
@@ -45,11 +53,12 @@ export default function ProfileScreen() {
   const displayEmail = user?.email ?? 'Account Email';
   const initials = getUserInitials(displayName, displayEmail);
   const currentTarget = pendingTarget ?? profile?.default_target ?? 75;
-  const actionBusy = signingOut || savingTarget;
+  const actionBusy = signingOut || savingTarget || deletingData;
 
   const handleDefaultTargetChange = async (nextTarget: number) => {
     if (
       savingTargetRef.current ||
+      deletingDataRef.current ||
       signingOutRef.current ||
       !profile ||
       nextTarget === profile.default_target
@@ -76,8 +85,51 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleDeleteAllData = async () => {
+    if (deletingDataRef.current || signingOutRef.current) {
+      return;
+    }
+
+    deletingDataRef.current = true;
+    setDeletingData(true);
+    setErrorMessage(null);
+
+    try {
+      await deleteAllAttendanceData();
+    } catch (err) {
+      if (!(err instanceof AppError)) {
+        console.error('Delete all attendance data failed:', err);
+      }
+      setErrorMessage(getFriendlyErrorMessage(err));
+    } finally {
+      deletingDataRef.current = false;
+      setDeletingData(false);
+    }
+  };
+
+  const handleConfirmDeleteAllData = () => {
+    if (deletingDataRef.current || signingOutRef.current) {
+      return;
+    }
+
+    Alert.alert(
+      'Reset All Attendance Data',
+      'This action will permanently delete every subject, timetable slot, and attendance record. Your account login remains active.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset Data',
+          style: 'destructive',
+          onPress: () => {
+            void handleDeleteAllData();
+          },
+        },
+      ]
+    );
+  };
+
   const handleSignOut = async () => {
-    if (signingOutRef.current) {
+    if (signingOutRef.current || deletingDataRef.current) {
       return;
     }
 
@@ -99,135 +151,337 @@ export default function ProfileScreen() {
   return (
     <Screen scroll contentContainerStyle={styles.scrollContent}>
       <View style={styles.container}>
+        {/* Page Title */}
         <View style={styles.titleGroup}>
-          <AppText variant="title">Profile</AppText>
+          <AppText variant="title">Settings & Profile</AppText>
           <AppText variant="caption" tone="muted">
-            Manage your account and default attendance targets
+            Manage your account preferences and academic goals
           </AppText>
         </View>
 
-        <View style={styles.contentGroup}>
-          <Card style={styles.identityCard}>
-            <View style={styles.identityRow}>
-              <View style={styles.avatarCircle}>
-                <AppText variant="heading" style={styles.avatarInitials}>
-                  {initials}
-                </AppText>
-              </View>
-              <View style={styles.identityTextGroup}>
-                <AppText variant="heading" numberOfLines={1} style={styles.userName}>
-                  {displayName}
-                </AppText>
-                <AppText variant="caption" tone="muted" numberOfLines={1} style={styles.userEmail}>
-                  {displayEmail}
-                </AppText>
-              </View>
-            </View>
-          </Card>
-
-          <View style={styles.section}>
-            <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
-              ACADEMIC GOALS
-            </AppText>
-
-            <Card style={styles.sectionCard}>
-              <View style={styles.cardHeaderRow}>
-                <View style={styles.iconBox}>
-                  <Ionicons
-                    name="speedometer-outline"
-                    size={18}
-                    color={colors.accent}
-                  />
-                </View>
-                <View style={styles.cardHeaderInfo}>
-                  <AppText variant="label" style={styles.cardHeaderTitle}>
-                    Default Attendance Target
-                  </AppText>
-                  <AppText variant="caption" tone="muted">
-                    Applied automatically when adding new subjects
-                  </AppText>
-                </View>
-              </View>
-
-              <View style={styles.stepperContainer}>
-                <Stepper
-                  label="Target Percentage"
-                  value={currentTarget}
-                  min={50}
-                  max={95}
-                  step={1}
-                  suffix="%"
-                  disabled={!profile || actionBusy}
-                  onChange={(nextValue) => {
-                    void handleDefaultTargetChange(nextValue);
-                  }}
-                />
-              </View>
-
-              <View style={styles.presetsRow}>
-                <AppText variant="caption" tone="muted" style={styles.presetsLabel}>
-                  Standard Presets:
-                </AppText>
-                <View style={styles.presetChips}>
-                  {TARGET_PRESETS.map((preset) => {
-                    const isSelected = currentTarget === preset;
-                    return (
-                      <PressableScale
-                        key={`preset-${preset}`}
-                        onPress={() => {
-                          void handleDefaultTargetChange(preset);
-                        }}
-                        disabled={!profile || actionBusy}
-                        style={[
-                          styles.presetChip,
-                          isSelected && styles.presetChipActive,
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Set target to ${preset} percent`}
-                      >
-                        <AppText
-                          variant="caption"
-                          style={[
-                            styles.presetChipText,
-                            isSelected && styles.presetChipTextActive,
-                          ]}
-                        >
-                          {preset}%{preset === 75 ? ' (Recommended)' : ''}
-                        </AppText>
-                      </PressableScale>
-                    );
-                  })}
+        {!profile ? (
+          <View
+            accessible
+            accessibilityLabel="Loading settings"
+            style={styles.skeletonSection}
+          >
+            {/* Identity Card Skeleton */}
+            <Card style={styles.identityCard}>
+              <View style={styles.identityRow}>
+                <Skeleton width={60} height={60} borderRadius={30} />
+                <View style={styles.identityTextGroup}>
+                  <Skeleton width="55%" height={22} />
+                  <Skeleton width="75%" height={16} />
+                  <Skeleton width="40%" height={20} borderRadius={10} />
                 </View>
               </View>
             </Card>
+
+            {/* Target Card Skeleton */}
+            <Card style={styles.sectionCard}>
+              <Skeleton width="60%" height={20} />
+              <Skeleton width="85%" height={14} style={{ marginTop: 6 }} />
+              <Skeleton width="100%" height={48} borderRadius={radius.control} style={{ marginTop: 16 }} />
+            </Card>
+
+            {/* Reminders Card Skeleton */}
+            <Card style={styles.sectionCard}>
+              <Skeleton width="50%" height={20} />
+              <Skeleton width="100%" height={44} borderRadius={radius.control} style={{ marginTop: 14 }} />
+            </Card>
           </View>
+        ) : (
+          <View style={styles.contentGroup}>
+            {/* 1. IDENTITY CARD */}
+            <Card style={styles.identityCard}>
+              <View style={styles.identityRow}>
+                <View style={styles.avatarCircle}>
+                  <AppText variant="heading" style={styles.avatarInitials}>
+                    {initials}
+                  </AppText>
+                </View>
+                <View style={styles.identityTextGroup}>
+                  <AppText variant="heading" numberOfLines={1} style={styles.userName}>
+                    {displayName}
+                  </AppText>
+                  <AppText variant="caption" tone="muted" numberOfLines={1} style={styles.userEmail}>
+                    {displayEmail}
+                  </AppText>
+                  <View style={styles.statusPill}>
+                    <View style={styles.statusDot} />
+                    <AppText variant="caption" style={styles.statusPillText}>
+                      Cloud Sync Active
+                    </AppText>
+                  </View>
+                </View>
+              </View>
+            </Card>
 
-          <Button
-            title="Sign out of account"
-            variant="secondary"
-            icon="log-out-outline"
-            fullWidth
-            loading={signingOut}
-            disabled={actionBusy}
-            onPress={() => {
-              void handleSignOut();
-            }}
-          />
-
-          {errorMessage && (
-            <View style={styles.errorBanner}>
-              <Ionicons
-                name="alert-circle-outline"
-                size={18}
-                color={colors.danger}
-                style={styles.errorIcon}
-              />
-              <AppText variant="caption" tone="danger" style={styles.errorText}>
-                {errorMessage}
+            {/* 2. ACADEMIC GOALS SECTION */}
+            <View style={styles.section}>
+              <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
+                ACADEMIC GOALS
               </AppText>
+
+              <Card style={styles.sectionCard}>
+                <View style={styles.cardHeaderRow}>
+                  <View style={styles.iconBox}>
+                    <Ionicons
+                      name="speedometer-outline"
+                      size={18}
+                      color={colors.accent}
+                    />
+                  </View>
+                  <View style={styles.cardHeaderInfo}>
+                    <AppText variant="label" style={styles.cardHeaderTitle}>
+                      Default Attendance Target
+                    </AppText>
+                    <AppText variant="caption" tone="muted">
+                      Applied automatically when adding new subjects
+                    </AppText>
+                  </View>
+                  {savingTarget && (
+                    <View style={styles.savingBadge}>
+                      <AppText variant="caption" tone="muted" style={styles.savingText}>
+                        Saving...
+                      </AppText>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.stepperContainer}>
+                  <Stepper
+                    label="Target Percentage"
+                    value={currentTarget}
+                    min={50}
+                    max={95}
+                    step={1}
+                    suffix="%"
+                    disabled={!profile || actionBusy}
+                    onChange={(nextValue) => {
+                      void handleDefaultTargetChange(nextValue);
+                    }}
+                  />
+                </View>
+
+                {/* Target Presets */}
+                <View style={styles.presetsRow}>
+                  <AppText variant="caption" tone="muted" style={styles.presetsLabel}>
+                    Standard Presets:
+                  </AppText>
+                  <View style={styles.presetChips}>
+                    {TARGET_PRESETS.map((preset) => {
+                      const isSelected = currentTarget === preset;
+                      return (
+                        <PressableScale
+                          key={`preset-${preset}`}
+                          onPress={() => {
+                            void handleDefaultTargetChange(preset);
+                          }}
+                          disabled={!profile || actionBusy}
+                          style={[
+                            styles.presetChip,
+                            isSelected && styles.presetChipActive,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Set target to ${preset} percent`}
+                        >
+                          <AppText
+                            variant="caption"
+                            style={[
+                              styles.presetChipText,
+                              isSelected && styles.presetChipTextActive,
+                            ]}
+                          >
+                            {preset}%{preset === 75 ? ' (Recommended)' : ''}
+                          </AppText>
+                        </PressableScale>
+                      );
+                    })}
+                  </View>
+                </View>
+              </Card>
             </View>
-          )}
-        </View>
+
+            {/* 3. CLASS REMINDERS */}
+            <View style={styles.section}>
+              <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
+                SCHEDULE NOTIFICATIONS
+              </AppText>
+              <RemindersCard disabled={signingOut || deletingData} />
+            </View>
+
+            {/* 4. ABOUT & LEGAL SECTION */}
+            <View style={styles.section}>
+              <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
+                ABOUT & COMPLIANCE
+              </AppText>
+
+              <Card style={styles.groupedCard}>
+                {/* Privacy Policy */}
+                <PressableScale
+                  onPress={() => router.push('/legal/privacy')}
+                  scaleTo={0.99}
+                  rippleColor={colors.rippleNeutral}
+                  accessibilityRole="link"
+                  accessibilityLabel="Privacy Policy"
+                  style={styles.menuRow}
+                >
+                  <View style={styles.menuIconBox}>
+                    <Ionicons
+                      name="shield-checkmark-outline"
+                      size={18}
+                      color={colors.text}
+                    />
+                  </View>
+                  <AppText variant="body" style={styles.menuRowLabel}>
+                    Privacy Policy
+                  </AppText>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={16}
+                    color={colors.textMuted}
+                  />
+                </PressableScale>
+
+                <View style={styles.menuDivider} />
+
+                {/* Terms and Conditions */}
+                <PressableScale
+                  onPress={() => router.push('/legal/terms')}
+                  scaleTo={0.99}
+                  rippleColor={colors.rippleNeutral}
+                  accessibilityRole="link"
+                  accessibilityLabel="Terms and Conditions"
+                  style={styles.menuRow}
+                >
+                  <View style={styles.menuIconBox}>
+                    <Ionicons
+                      name="document-text-outline"
+                      size={18}
+                      color={colors.text}
+                    />
+                  </View>
+                  <AppText variant="body" style={styles.menuRowLabel}>
+                    Terms and Conditions
+                  </AppText>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={16}
+                    color={colors.textMuted}
+                  />
+                </PressableScale>
+
+                <View style={styles.menuDivider} />
+
+                {/* Support Contact */}
+                <View style={styles.menuRowStatic}>
+                  <View style={styles.menuIconBox}>
+                    <Ionicons
+                      name="mail-outline"
+                      size={18}
+                      color={colors.text}
+                    />
+                  </View>
+                  <View style={styles.menuStaticTextCol}>
+                    <AppText variant="body" style={styles.menuRowLabel}>
+                      Developer Support
+                    </AppText>
+                    <AppText variant="caption" tone="muted">
+                      {CONTACT_EMAIL}
+                    </AppText>
+                  </View>
+                </View>
+
+                <View style={styles.menuDivider} />
+
+                {/* App Version */}
+                <View style={styles.menuRowStatic}>
+                  <View style={styles.menuIconBox}>
+                    <Ionicons
+                      name="information-circle-outline"
+                      size={18}
+                      color={colors.text}
+                    />
+                  </View>
+                  <AppText variant="body" style={styles.menuRowLabel}>
+                    Application Version
+                  </AppText>
+                  <AppText variant="caption" tone="muted" style={styles.versionBadge}>
+                    1.0.0
+                  </AppText>
+                </View>
+              </Card>
+            </View>
+
+            {/* 5. DATA & ACCOUNT ZONE */}
+            <View style={styles.section}>
+              <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
+                DATA MANAGEMENT
+              </AppText>
+
+              <Card style={styles.dangerZoneCard}>
+                <View style={styles.cardHeaderRow}>
+                  <View style={[styles.iconBox, { backgroundColor: colors.dangerBg }]}>
+                    <Ionicons
+                      name="trash-outline"
+                      size={18}
+                      color={colors.danger}
+                    />
+                  </View>
+                  <View style={styles.cardHeaderInfo}>
+                    <AppText variant="label" style={styles.cardHeaderTitle}>
+                      Reset Attendance Records
+                    </AppText>
+                    <AppText variant="caption" tone="muted">
+                      Permanently clears all subjects, timetable slots, and attendance logs. Your account session stays signed in.
+                    </AppText>
+                  </View>
+                </View>
+
+                <Button
+                  title="Reset all attendance data"
+                  variant="danger"
+                  icon="trash-outline"
+                  fullWidth
+                  loading={deletingData}
+                  disabled={actionBusy}
+                  onPress={handleConfirmDeleteAllData}
+                  style={styles.dangerActionBtn}
+                />
+              </Card>
+
+              {/* Sign Out Action */}
+              <Button
+                title="Sign out of account"
+                variant="secondary"
+                icon="log-out-outline"
+                fullWidth
+                loading={signingOut}
+                disabled={actionBusy}
+                onPress={() => {
+                  void handleSignOut();
+                }}
+                style={styles.signOutBtn}
+              />
+            </View>
+
+            {/* Error Message Alert */}
+            {errorMessage && (
+              <View style={styles.errorBanner} accessibilityRole="alert">
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={18}
+                  color={colors.danger}
+                  style={styles.errorIcon}
+                />
+                <AppText variant="caption" tone="danger" style={styles.errorText}>
+                  {errorMessage}
+                </AppText>
+              </View>
+            )}
+          </View>
+        )}
       </View>
     </Screen>
   );
