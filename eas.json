@@ -1,0 +1,17 @@
+{
+  "cli": {
+    "appVersionSource": "local"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://ldfhkbrvdhwojnywgngl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_KEY": "sb_publishable_78wWdAPamoxA__bCksPTmQ_-_omtVPJ"
+      }
+    }
+  }
+}
