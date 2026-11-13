@@ -29,3 +29,17 @@
 - `(tabs)/today`
 - `(tabs)/subjects`
 - `(tabs)/profile`
+- `subject-form`
+- `slot-form`
+- `subject/[id]`
+- `simulator`
+- `legal/privacy`
+- `legal/terms`
+
+## Build Log
+
+- Prompt 1: Scaffolded Expo project, installed core dependencies and `@expo/vector-icons`, removed starter demo content, configured `app.json` and env files, created Supabase client, DB types, date helpers, theme tokens, base UI components, and project documentation. Upgraded from Expo SDK 57 to SDK 58 to match Expo Go.
+- Prompt 2: Added error mapping and Supabase result unwrappers (`src/lib/errors.ts`), auth and profile session context (`src/context/AuthProvider.tsx`), splash-gated protected root navigation (`src/app/_layout.tsx`), email and password login and signup flows (`src/app/(auth)/`), and the signed-in bottom tab shell with a live Profile screen (`src/app/(tabs)/`). Removed the placeholder root index screen.
+- Prompt 3: Added subjects and timetable slots data helpers (`src/data/subjects.ts`, `src/data/slots.ts`), app data context (`src/context/DataProvider.tsx`), shared header options (`src/theme/navigation.ts`), reusable UI controls (`Segmented`, `Stepper`, `TimeField`, `EmptyState`, `ErrorState`), modal subject and class form routes (`src/app/subject-form.tsx`, `src/app/slot-form.tsx`), full Subjects and Timetable views in `src/app/(tabs)/subjects.tsx`, and the default target attendance card in `src/app/(tabs)/profile.tsx`.
+- Prompt 4: Added the integer-arithmetic attendance math engine (`src/lib/attendance.ts`) and verification script (`scripts/verify-attendance.ts`), daily log data helpers (`src/data/logs.ts`), `ProgressRing`, `LevelBadge`, `TodayClassCard`, and `WhatIfSimulator` components, the Today attendance screen (`src/app/(tabs)/today.tsx`), the Overview bento dashboard (`src/app/(tabs)/index.tsx`), subject detail route (`src/app/subject/[id].tsx`), standalone What-if simulator route (`src/app/simulator.tsx`), root stack header registration (`src/app/_layout.tsx`), and updated subject card navigation in `src/app/(tabs)/subjects.tsx`.
+- Prompt 5: Added local class reminder preferences (`src/lib/prefs.ts`), local notification scheduling and Android channel setup (`src/lib/reminders.ts`), reminder sync context (`src/context/RemindersProvider.tsx`), and the Profile reminders card (`src/components/RemindersCard.tsx`) with sign-out cancellation; added per-subject log history fetching (`src/data/logs.ts`), `TrendChart`, `HistoryList`, and present/absent/cancelled totals on `src/app/subject/[id].tsx`; added the `Skeleton` pulse component (`src/components/ui/Skeleton.tsx`), replaced loading text across screens, and exported a root `ErrorBoundary` in `src/app/_layout.tsx`; added plain-English Privacy Policy and Terms and Conditions (`src/constants/legal.ts`, `src/components/LegalDocument.tsx`, `src/app/legal/privacy.tsx`, `src/app/legal/terms.tsx`), signup legal links, Profile legal links, and the delete-all-attendance-data action.
