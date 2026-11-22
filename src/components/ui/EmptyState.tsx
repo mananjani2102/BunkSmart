@@ -11,6 +11,8 @@ export interface EmptyStateProps {
   message: string;
   actionLabel?: string;
   onAction?: () => void;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
   icon?: IoniconName;
   style?: StyleProp<ViewStyle>;
 }
@@ -20,6 +22,8 @@ export function EmptyState({
   message,
   actionLabel,
   onAction,
+  secondaryActionLabel,
+  onSecondaryAction,
   icon,
   style,
 }: EmptyStateProps) {
@@ -50,6 +54,15 @@ export function EmptyState({
             style={styles.action}
           />
         ) : null}
+
+        {secondaryActionLabel && onSecondaryAction ? (
+          <Button
+            title={secondaryActionLabel}
+            variant="secondary"
+            onPress={onSecondaryAction}
+            style={actionLabel ? styles.secondaryAction : styles.action}
+          />
+        ) : null}
       </View>
     </Card>
   );
@@ -75,5 +88,9 @@ const styles = StyleSheet.create({
   action: {
     alignSelf: 'center',
     marginTop: spacing.lg,
+  },
+  secondaryAction: {
+    alignSelf: 'center',
+    marginTop: spacing.sm,
   },
 });
