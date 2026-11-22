@@ -47,6 +47,29 @@ export async function createSubject(input: SubjectInput): Promise<Subject> {
   return unwrapData(result);
 }
 
+export async function createSubjects(
+  inputs: SubjectInput[]
+): Promise<Subject[]> {
+  if (inputs.length === 0) {
+    return [];
+  }
+
+  const payload: SubjectInput[] = inputs.map((input) => ({
+    name: input.name.trim(),
+    target_percent: input.target_percent,
+    initial_present: input.initial_present,
+    initial_total: input.initial_total,
+  }));
+
+  const result = await supabase
+    .from('subjects')
+    .insert(payload)
+    .select(SUBJECT_COLUMNS)
+    .overrideTypes<Subject[], { merge: false }>();
+
+  return unwrapData(result);
+}
+
 export async function updateSubject(
   id: string,
   input: Partial<SubjectInput>
