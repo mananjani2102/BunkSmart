@@ -66,3 +66,17 @@ export async function clearLogStatus(logId: string): Promise<void> {
 
   assertNoError(result);
 }
+
+export async function countAttendanceLogs(userId?: string): Promise<number> {
+  let query = supabase
+    .from('attendance_logs')
+    .select('id', { count: 'exact', head: true });
+
+  if (userId) {
+    query = query.eq('user_id', userId);
+  }
+
+  const result = await query;
+  assertNoError(result);
+  return result.count ?? 0;
+}
