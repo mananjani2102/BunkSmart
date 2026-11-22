@@ -33,6 +33,29 @@ export async function createSlot(input: SlotInput): Promise<TimetableSlot> {
   return unwrapData(result);
 }
 
+export async function createSlots(
+  inputs: SlotInput[]
+): Promise<TimetableSlot[]> {
+  if (inputs.length === 0) {
+    return [];
+  }
+
+  const payload: SlotInput[] = inputs.map((input) => ({
+    subject_id: input.subject_id,
+    weekday: input.weekday,
+    start_time: input.start_time,
+    end_time: input.end_time,
+  }));
+
+  const result = await supabase
+    .from('timetable_slots')
+    .insert(payload)
+    .select(SLOT_COLUMNS)
+    .overrideTypes<TimetableSlot[], { merge: false }>();
+
+  return unwrapData(result);
+}
+
 export async function updateSlot(
   id: string,
   input: Partial<SlotInput>
@@ -64,5 +87,13 @@ export async function updateSlot(
 
 export async function deleteSlot(id: string): Promise<void> {
   const result = await supabase.from('timetable_slots').delete().eq('id', id);
+  assertNoError(result);
+}
+
+export async function deleteAllSlots(userId: string): Promise<void> {
+  const result = await supabase
+    .from('timetable_slots')
+    .delete()
+    .eq('user_id', userId);
   assertNoError(result);
 }
