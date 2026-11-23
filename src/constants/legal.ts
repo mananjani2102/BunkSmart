@@ -1,6 +1,6 @@
 export const AUTHOR_NAME = 'Jani Manan';
 export const CONTACT_EMAIL = 'manan.jani.cg@gmail.com';
-export const LEGAL_LAST_UPDATED = '18 November 2026';
+export const LEGAL_LAST_UPDATED = '23 November 2026';
 
 export interface LegalSection {
   heading: string;
@@ -26,6 +26,7 @@ export const PRIVACY_POLICY: LegalDocumentContent = {
       paragraphs: [
         'BunkSmart stores your email, full name, and password. Passwords are handled by Supabase Auth and stored hashed.',
         'It also stores your subjects, attendance targets, weekly timetable, and attendance entries.',
+        'It also stores the overall attendance numbers you choose to enter. The timetable text you paste for import is not stored, only the classes created from it.',
       ],
     },
     {
