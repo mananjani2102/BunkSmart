@@ -109,6 +109,10 @@ function RootNavigator() {
           options={{ ...modalHeaderOptions, title: 'New class' }}
         />
         <Stack.Screen
+          name="timetable-import"
+          options={{ ...modalHeaderOptions, title: 'Import timetable' }}
+        />
+        <Stack.Screen
           name="subject/[id]"
           options={{ ...sharedHeaderOptions, title: 'Subject' }}
         />
