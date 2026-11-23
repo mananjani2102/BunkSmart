@@ -11,20 +11,25 @@ import {
 } from 'react';
 
 import { useAuth } from '@/context/AuthProvider';
+import { countAttendanceLogs } from '@/data/logs';
 import {
   createSlot as createSlotRecord,
+  createSlots as createSlotsRecord,
+  deleteAllSlots as deleteAllSlotsRecord,
   deleteSlot as deleteSlotRecord,
   fetchSlots,
   updateSlot as updateSlotRecord,
 } from '@/data/slots';
 import {
   createSubject as createSubjectRecord,
+  createSubjects as createSubjectsRecord,
   deleteAllSubjects as deleteAllSubjectsRecord,
   deleteSubject as deleteSubjectRecord,
   fetchSubjects,
   fetchSubjectStats,
   updateSubject as updateSubjectRecord,
 } from '@/data/subjects';
+import { clampTarget } from '@/lib/attendance';
 import { AppError, getFriendlyErrorMessage } from '@/lib/errors';
 import { cancelAllClassReminders } from '@/lib/reminders';
 import {
@@ -37,6 +42,18 @@ import {
 } from '@/types/db';
 
 export type DataStatus = 'loading' | 'ready' | 'error';
+
+export interface TimetableImportSlotInput {
+  subjectName: string;
+  weekday: number;
+  startTime: string;
+  endTime: string | null;
+}
+
+export interface ImportTimetableResult {
+  createdSubjectsCount: number;
+  createdSlotsCount: number;
+}
 
 export interface DataContextValue {
   status: DataStatus;
@@ -61,6 +78,11 @@ export interface DataContextValue {
     input: Partial<SlotInput>
   ) => Promise<TimetableSlot>;
   deleteSlot: (id: string) => Promise<void>;
+  importTimetable: (
+    newSubjectNames: string[],
+    slots: TimetableImportSlotInput[],
+    replace: boolean
+  ) => Promise<ImportTimetableResult>;
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -139,7 +161,7 @@ async function fetchAllData(): Promise<CachedData> {
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const userId = user?.id ?? null;
 
   const [prevUserId, setPrevUserId] = useState<string | null>(userId);
@@ -473,6 +495,107 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [reload]
   );
 
+  const importTimetable = useCallback(
+    async (
+      newSubjectNames: string[],
+      importSlots: TimetableImportSlotInput[],
+      replace: boolean
+    ): Promise<ImportTimetableResult> => {
+      if (!userId) {
+        throw new AppError('You must be signed in to import a timetable.');
+      }
+
+      try {
+        if (replace) {
+          const logsCount = await countAttendanceLogs(userId);
+          if (logsCount > 0) {
+            throw new AppError(
+              'Cannot replace timetable because attendance logs already exist. Use "Add to my timetable" instead.'
+            );
+          }
+          await deleteAllSlotsRecord(userId);
+        }
+
+        // Build existing subjects lookup map (case-insensitive)
+        const subjectMap = new Map<string, Subject>();
+        for (const s of subjects) {
+          subjectMap.set(s.name.trim().replace(/\s+/g, ' ').toLowerCase(), s);
+        }
+
+        // Determine which subjects are truly new, merging names that differ only by case
+        const missingInputs: SubjectInput[] = [];
+        const seenNew = new Set<string>();
+        const defaultTarget = clampTarget(profile?.default_target ?? 75);
+
+        for (const rawName of newSubjectNames) {
+          const cleanName = rawName.trim().replace(/\s+/g, ' ');
+          const key = cleanName.toLowerCase();
+          if (!subjectMap.has(key) && !seenNew.has(key)) {
+            seenNew.add(key);
+            missingInputs.push({
+              name: cleanName,
+              target_percent: defaultTarget,
+              initial_present: 0,
+              initial_total: 0,
+            });
+          }
+        }
+
+        if (missingInputs.length > 0) {
+          const created = await createSubjectsRecord(missingInputs);
+          for (const s of created) {
+            subjectMap.set(s.name.trim().replace(/\s+/g, ' ').toLowerCase(), s);
+          }
+        }
+
+        // Prepare slots to create
+        // If replace is false, skip slots that already exist in timetable (same weekday and start_time)
+        const existingSlotKeys = replace
+          ? new Set<string>()
+          : new Set(slots.map((s) => `${s.weekday}:${s.start_time}`));
+
+        const slotsToCreate: SlotInput[] = [];
+        for (const slot of importSlots) {
+          const slotKey = `${slot.weekday}:${slot.startTime}`;
+          if (!replace && existingSlotKeys.has(slotKey)) {
+            continue;
+          }
+          existingSlotKeys.add(slotKey);
+
+          const key = slot.subjectName.trim().replace(/\s+/g, ' ').toLowerCase();
+          const targetSubject = subjectMap.get(key);
+          if (!targetSubject) {
+            throw new AppError(
+              `Could not find or create subject "${slot.subjectName}".`
+            );
+          }
+
+          slotsToCreate.push({
+            subject_id: targetSubject.id,
+            weekday: slot.weekday,
+            start_time: slot.startTime,
+            end_time: slot.endTime,
+          });
+        }
+
+        if (slotsToCreate.length > 0) {
+          await createSlotsRecord(slotsToCreate);
+        }
+
+        await reload(true);
+
+        return {
+          createdSubjectsCount: missingInputs.length,
+          createdSlotsCount: slotsToCreate.length,
+        };
+      } catch (err) {
+        throw toAppError(err);
+      }
+    },
+    [profile, reload, slots, subjects, userId]
+  );
+
+
   const value = useMemo<DataContextValue>(
     () => ({
       status,
@@ -490,6 +613,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addSlot,
       updateSlot,
       deleteSlot,
+      importTimetable,
     }),
     [
       status,
@@ -507,6 +631,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addSlot,
       updateSlot,
       deleteSlot,
+      importTimetable,
     ]
   );
 
