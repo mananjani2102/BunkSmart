@@ -260,6 +260,8 @@ export default function SubjectsScreen() {
                   message="Add the subjects you attend this semester. You can customize the target attendance percentage for each course."
                   actionLabel="Add your first subject"
                   onAction={openNewSubject}
+                  secondaryActionLabel="Import timetable from text"
+                  onSecondaryAction={() => router.push('/timetable-import')}
                   style={styles.stateCard}
                 />
               ) : (
@@ -462,10 +464,21 @@ export default function SubjectsScreen() {
                 message="Add at least one subject before scheduling your weekly timetable slots."
                 actionLabel="Add Subject"
                 onAction={openNewSubject}
+                secondaryActionLabel="Import from text"
+                onSecondaryAction={() => router.push('/timetable-import')}
                 style={styles.stateCard}
               />
             ) : (
               <View style={styles.timetableSection}>
+                <View style={styles.timetableTopBar}>
+                  <Button
+                    title="Import from text"
+                    variant="secondary"
+                    icon="document-text-outline"
+                    onPress={() => router.push('/timetable-import')}
+                  />
+                </View>
+
                 {/* Modern Day Selector Bar */}
                 <View style={styles.daySelectorContainer}>
                   <ScrollView
@@ -561,6 +574,8 @@ export default function SubjectsScreen() {
                       message={`No classes on ${selectedWeekdayName}. Enjoy your free time or add a slot.`}
                       actionLabel={`Add class on ${selectedWeekdayName}`}
                       onAction={openNewSlot}
+                      secondaryActionLabel="Import from text"
+                      onSecondaryAction={() => router.push('/timetable-import')}
                       style={styles.stateCard}
                     />
                   ) : (
@@ -830,6 +845,9 @@ const styles = StyleSheet.create({
   timetableSection: {
     marginTop: spacing.lg,
     gap: spacing.lg,
+  },
+  timetableTopBar: {
+    alignItems: 'flex-start',
   },
   daySelectorContainer: {
     marginHorizontal: -spacing.lg,
