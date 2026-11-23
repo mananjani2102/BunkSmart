@@ -4,6 +4,9 @@ export interface Profile {
   id: string;
   full_name: string;
   default_target: number;
+  baseline_attended: number;
+  baseline_held: number;
+  baseline_date: string | null;
   created_at: string;
   updated_at: string;
 }
