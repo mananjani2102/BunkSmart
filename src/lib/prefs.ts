@@ -19,6 +19,10 @@ function getReminderStorageKey(userId: string): string {
   return `bunksmart:reminders:${userId}`;
 }
 
+function getOverviewBaselineHintKey(userId: string): string {
+  return `bunksmart:overview-baseline-hint-dismissed:${userId}`;
+}
+
 function isReminderMinutes(value: unknown): value is ReminderMinutes {
   return (
     typeof value === 'number' &&
@@ -78,4 +82,37 @@ export async function writeReminderSettings(
     getReminderStorageKey(userId),
     JSON.stringify(sanitized)
   );
+}
+
+export async function readOverviewBaselineHintDismissed(
+  userId: string
+): Promise<boolean> {
+  if (!userId || (typeof window === 'undefined' && Platform.OS === 'web')) {
+    return false;
+  }
+
+  try {
+    const raw = await AsyncStorage.getItem(getOverviewBaselineHintKey(userId));
+    return raw === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export async function writeOverviewBaselineHintDismissed(
+  userId: string,
+  dismissed: boolean
+): Promise<void> {
+  if (!userId || (typeof window === 'undefined' && Platform.OS === 'web')) {
+    return;
+  }
+
+  try {
+    await AsyncStorage.setItem(
+      getOverviewBaselineHintKey(userId),
+      dismissed ? 'true' : 'false'
+    );
+  } catch {
+    // Ignore storage write errors.
+  }
 }
