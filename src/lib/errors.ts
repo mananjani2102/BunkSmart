@@ -79,7 +79,10 @@ export function getFriendlyErrorMessage(error: unknown): string {
     return 'Too many attempts. Wait a minute and try again.';
   }
 
-  // Match specific unique constraints before generic Postgres 23505.
+  // Match specific unique and check constraints before generic Postgres codes.
+  if (text.includes('profiles_baseline_valid')) {
+    return 'Attended classes cannot be more than held classes.';
+  }
   if (text.includes('subjects_user_name_key')) {
     return 'You already have a subject with this name.';
   }
