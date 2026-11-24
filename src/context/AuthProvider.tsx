@@ -21,7 +21,8 @@ import { cancelAllClassReminders } from '@/lib/reminders';
 import { supabase } from '@/lib/supabase';
 import { type Profile } from '@/types/db';
 
-const PROFILE_COLUMNS = 'id, full_name, default_target, created_at, updated_at';
+const PROFILE_COLUMNS =
+  'id, full_name, default_target, baseline_attended, baseline_held, baseline_date, created_at, updated_at';
 
 export interface SignInResult {
   error: string | null;
@@ -35,6 +36,9 @@ export interface SignUpResult {
 export interface ProfilePatch {
   full_name?: string;
   default_target?: number;
+  baseline_attended?: number;
+  baseline_held?: number;
+  baseline_date?: string | null;
 }
 
 export interface AuthContextValue {
@@ -278,6 +282,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (patch.default_target !== undefined) {
         payload.default_target = patch.default_target;
+      }
+      if (patch.baseline_attended !== undefined) {
+        payload.baseline_attended = patch.baseline_attended;
+      }
+      if (patch.baseline_held !== undefined) {
+        payload.baseline_held = patch.baseline_held;
+      }
+      if (patch.baseline_date !== undefined) {
+        payload.baseline_date = patch.baseline_date;
       }
 
       const updated = unwrapData(
