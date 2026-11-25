@@ -49,6 +49,7 @@ export const LONG_MONTHS = [
 ] as const;
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const TYPED_DATE_PATTERN = /^(\d{1,2})([/.\-])(\d{1,2})\2(\d{4})$/;
 const TIME_PATTERN = /^(\d{2}):(\d{2})(?::(\d{2}))?$/;
 
 function pad2(value: number): string {
@@ -192,4 +193,67 @@ export function formatMonthYear(dateStr: string): string {
   const date = parseDateString(dateStr);
   const monthLabel = LONG_MONTHS[date.getMonth()];
   return `${monthLabel} ${date.getFullYear()}`;
+}
+
+export function parseTypedDate(raw: string): string | null {
+  const trimmed = raw.trim();
+  const match = TYPED_DATE_PATTERN.exec(trimmed);
+  if (!match) {
+    return null;
+  }
+
+  const day = Number(match[1]);
+  const month = Number(match[3]);
+  const year = Number(match[4]);
+
+  if (year < 1900 || year > 9999) {
+    return null;
+  }
+
+  const candidate = `${String(year).padStart(4, '0')}-${pad2(month)}-${pad2(day)}`;
+  return isValidDateString(candidate) ? candidate : null;
+}
+
+export function formatDateDDMMYYYY(dateStr: string): string {
+  if (!isValidDateString(dateStr)) {
+    throw new Error(`Invalid local date string: ${dateStr}`);
+  }
+
+  const [year, month, day] = dateStr.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function toUtcDayNumber(dateStr: string): number {
+  if (!isValidDateString(dateStr)) {
+    throw new Error(`Invalid local date string: ${dateStr}`);
+  }
+
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return Math.floor(Date.UTC(year, month - 1, day) / 86400000);
+}
+
+export function countWeekdayOccurrences(
+  startDateStr: string,
+  endDateStr: string,
+  isoWeekday: number
+): number {
+  if (!Number.isInteger(isoWeekday) || isoWeekday < 1 || isoWeekday > 7) {
+    throw new Error(`Invalid ISO weekday: ${isoWeekday}`);
+  }
+
+  const startDayNum = toUtcDayNumber(startDateStr);
+  const endDayNum = toUtcDayNumber(endDateStr);
+  if (startDayNum > endDayNum) {
+    return 0;
+  }
+
+  const totalDays = endDayNum - startDayNum + 1;
+  const startWeekday = getIsoWeekday(startDateStr);
+  const offset = (isoWeekday - startWeekday + 7) % 7;
+
+  if (offset >= totalDays) {
+    return 0;
+  }
+
+  return 1 + Math.floor((totalDays - 1 - offset) / 7);
 }
