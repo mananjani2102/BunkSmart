@@ -11,7 +11,7 @@ import {
 } from 'react';
 
 import { useAuth } from '@/context/AuthProvider';
-import { countAttendanceLogs } from '@/data/logs';
+import { countAttendanceLogs, countLogsAfterDate } from '@/data/logs';
 import {
   createSlot as createSlotRecord,
   createSlots as createSlotsRecord,
@@ -30,7 +30,13 @@ import {
   updateSubject as updateSubjectRecord,
 } from '@/data/subjects';
 import { clampTarget } from '@/lib/attendance';
+import { formatDateString, getTodayDateString } from '@/lib/dates';
 import { AppError, getFriendlyErrorMessage } from '@/lib/errors';
+import {
+  computeOverallAttendance,
+  type LogsAfterBaselineCounts,
+  type OverallResult,
+} from '@/lib/overall';
 import { cancelAllClassReminders } from '@/lib/reminders';
 import {
   type AttendanceStatus,
@@ -61,12 +67,15 @@ export interface DataContextValue {
   subjects: Subject[];
   slots: TimetableSlot[];
   statsBySubject: Record<string, SubjectStats>;
+  overall: OverallResult;
+  trackedSince: string;
   reload: (silent?: boolean) => Promise<void>;
   reloadStats: () => Promise<void>;
   applyOptimisticAttendanceChange: (
     subjectId: string,
     previousStatus: AttendanceStatus | null,
-    nextStatus: AttendanceStatus | null
+    nextStatus: AttendanceStatus | null,
+    logDate?: string
   ) => void;
   addSubject: (input: SubjectInput) => Promise<Subject>;
   updateSubject: (id: string, input: Partial<SubjectInput>) => Promise<Subject>;
@@ -146,6 +155,21 @@ function toAppError(err: unknown): AppError {
   return new AppError(getFriendlyErrorMessage(err));
 }
 
+function resolveTrackedSince(createdAt?: string | null): string {
+  if (typeof createdAt === 'string' && createdAt.trim().length > 0) {
+    const parsed = new Date(createdAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      return formatDateString(parsed);
+    }
+  }
+  return getTodayDateString();
+}
+
+const EMPTY_BASELINE_LOGS: LogsAfterBaselineCounts = {
+  present: 0,
+  absent: 0,
+};
+
 async function fetchAllData(): Promise<CachedData> {
   const [loadedSubjects, loadedSlots, loadedStats] = await Promise.all([
     fetchSubjects(),
@@ -172,18 +196,43 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [statsBySubject, setStatsBySubject] = useState<
     Record<string, SubjectStats>
   >({});
+  const [logsAfterBaseline, setLogsAfterBaseline] =
+    useState<LogsAfterBaselineCounts>(EMPTY_BASELINE_LOGS);
+
+  const baselineHeld = profile?.baseline_held ?? 0;
+  const baselineAttended = profile?.baseline_attended ?? 0;
+  const baselineDate =
+    typeof profile?.baseline_date === 'string' &&
+      profile.baseline_date.trim().length > 0
+      ? profile.baseline_date.trim()
+      : null;
+  const hasCollegeBaseline = baselineHeld > 0 && baselineDate !== null;
+  const baselineKey =
+    userId && hasCollegeBaseline && baselineDate
+      ? `${userId}:${baselineDate}`
+      : null;
+  const [prevBaselineKey, setPrevBaselineKey] = useState<string | null>(
+    baselineKey
+  );
 
   if (prevUserId !== userId) {
     setPrevUserId(userId);
     setSubjects([]);
     setSlots([]);
     setStatsBySubject({});
+    setLogsAfterBaseline(EMPTY_BASELINE_LOGS);
     setError(null);
     setStatus('loading');
   }
 
+  if (prevBaselineKey !== baselineKey) {
+    setPrevBaselineKey(baselineKey);
+    setLogsAfterBaseline(EMPTY_BASELINE_LOGS);
+  }
+
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
+  const baselineRequestIdRef = useRef(0);
   const activeUserIdRef = useRef<string | null>(userId);
 
   useEffect(() => {
@@ -200,6 +249,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
 
       const requestId = ++requestIdRef.current;
+      const baselineRequestId = ++baselineRequestIdRef.current;
 
       if (!silent) {
         setStatus('loading');
@@ -207,7 +257,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const data = await fetchAllData();
+        const [data, afterCounts] = await Promise.all([
+          fetchAllData(),
+          hasCollegeBaseline && baselineDate
+            ? countLogsAfterDate(baselineDate)
+            : Promise.resolve(EMPTY_BASELINE_LOGS),
+        ]);
 
         if (
           !mountedRef.current ||
@@ -220,6 +275,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
         setSubjects(data.subjects);
         setSlots(data.slots);
         setStatsBySubject(data.statsBySubject);
+        if (baselineRequestIdRef.current === baselineRequestId) {
+          setLogsAfterBaseline(afterCounts);
+        }
         setError(null);
         setStatus('ready');
         void writeCachedData(userId, data);
@@ -238,7 +296,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [userId]
+    [userId, hasCollegeBaseline, baselineDate]
   );
 
   const reloadStats = useCallback(async (): Promise<void> => {
@@ -246,13 +304,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const baselineRequestId = ++baselineRequestIdRef.current;
+
     try {
-      const loadedStats = await fetchSubjectStats();
+      const [loadedStats, afterCounts] = await Promise.all([
+        fetchSubjectStats(),
+        hasCollegeBaseline && baselineDate
+          ? countLogsAfterDate(baselineDate)
+          : Promise.resolve(EMPTY_BASELINE_LOGS),
+      ]);
       if (!mountedRef.current || activeUserIdRef.current !== userId) {
         return;
       }
       const nextStats = buildStatsMap(loadedStats);
       setStatsBySubject(nextStats);
+      if (baselineRequestIdRef.current === baselineRequestId) {
+        setLogsAfterBaseline(afterCounts);
+      }
       setSubjects((currentSubjects) => {
         setSlots((currentSlots) => {
           void writeCachedData(userId, {
@@ -267,16 +335,46 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch {
       // Keep current stats on silent stats refresh failure.
     }
-  }, [userId]);
+  }, [userId, hasCollegeBaseline, baselineDate]);
 
   const applyOptimisticAttendanceChange = useCallback(
     (
       subjectId: string,
       previousStatus: AttendanceStatus | null,
-      nextStatus: AttendanceStatus | null
+      nextStatus: AttendanceStatus | null,
+      logDate?: string
     ) => {
       if (previousStatus === nextStatus) {
         return;
+      }
+
+      if (
+        hasCollegeBaseline &&
+        baselineDate &&
+        logDate &&
+        logDate > baselineDate
+      ) {
+        let deltaPresent = 0;
+        let deltaAbsent = 0;
+
+        if (previousStatus === 'present') {
+          deltaPresent -= 1;
+        } else if (previousStatus === 'absent') {
+          deltaAbsent -= 1;
+        }
+
+        if (nextStatus === 'present') {
+          deltaPresent += 1;
+        } else if (nextStatus === 'absent') {
+          deltaAbsent += 1;
+        }
+
+        if (deltaPresent !== 0 || deltaAbsent !== 0) {
+          setLogsAfterBaseline((prev) => ({
+            present: Math.max(0, prev.present + deltaPresent),
+            absent: Math.max(0, prev.absent + deltaAbsent),
+          }));
+        }
       }
 
       setStatsBySubject((prev) => {
@@ -327,7 +425,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         };
       });
     },
-    [subjects, userId]
+    [subjects, userId, hasCollegeBaseline, baselineDate]
   );
 
   useEffect(() => {
@@ -402,6 +500,38 @@ export function DataProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [userId]);
+
+  useEffect(() => {
+    if (!userId || !hasCollegeBaseline || !baselineDate) {
+      return;
+    }
+
+    let cancelled = false;
+    const baselineRequestId = ++baselineRequestIdRef.current;
+
+    const loadBaselineLogs = async () => {
+      try {
+        const counts = await countLogsAfterDate(baselineDate);
+        if (
+          cancelled ||
+          !mountedRef.current ||
+          activeUserIdRef.current !== userId ||
+          baselineRequestIdRef.current !== baselineRequestId
+        ) {
+          return;
+        }
+        setLogsAfterBaseline(counts);
+      } catch {
+        // Keep last known counts on silent baseline count refresh failure.
+      }
+    };
+
+    void loadBaselineLogs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, hasCollegeBaseline, baselineDate]);
 
   const addSubject = useCallback(
     async (input: SubjectInput): Promise<Subject> => {
@@ -595,6 +725,37 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [profile, reload, slots, subjects, userId]
   );
 
+  const overall = useMemo<OverallResult>(() => {
+    const subjectStats = subjects.map((subject) => {
+      const stats = statsBySubject[subject.id];
+      return {
+        attended: stats?.attended ?? subject.initial_present,
+        held: stats?.conducted ?? subject.initial_total,
+      };
+    });
+
+    return computeOverallAttendance(
+      {
+        baseline_attended: baselineAttended,
+        baseline_held: baselineHeld,
+        baseline_date: baselineDate,
+      },
+      subjectStats,
+      logsAfterBaseline
+    );
+  }, [
+    subjects,
+    statsBySubject,
+    baselineAttended,
+    baselineHeld,
+    baselineDate,
+    logsAfterBaseline,
+  ]);
+
+  const trackedSince = useMemo(
+    () => resolveTrackedSince(profile?.created_at),
+    [profile?.created_at]
+  );
 
   const value = useMemo<DataContextValue>(
     () => ({
@@ -603,6 +764,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       subjects,
       slots,
       statsBySubject,
+      overall,
+      trackedSince,
       reload,
       reloadStats,
       applyOptimisticAttendanceChange,
@@ -621,6 +784,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       subjects,
       slots,
       statsBySubject,
+      overall,
+      trackedSince,
       reload,
       reloadStats,
       applyOptimisticAttendanceChange,
