@@ -14,6 +14,7 @@ import { Stepper } from '@/components/ui/Stepper';
 import { CONTACT_EMAIL } from '@/constants/legal';
 import { useAuth } from '@/context/AuthProvider';
 import { useData } from '@/context/DataProvider';
+import { formatFriendlyDateLabel } from '@/lib/dates';
 import { AppError, getFriendlyErrorMessage } from '@/lib/errors';
 import { colors, radius, spacing } from '@/theme/tokens';
 
@@ -300,6 +301,68 @@ export default function ProfileScreen() {
                     })}
                   </View>
                 </View>
+              </Card>
+
+              <Card style={styles.sectionCard}>
+                <View style={styles.cardHeaderRow}>
+                  <View style={styles.iconBox}>
+                    <Ionicons
+                      name="school-outline"
+                      size={18}
+                      color={colors.accent}
+                    />
+                  </View>
+                  <View style={styles.cardHeaderInfo}>
+                    <AppText variant="label" style={styles.cardHeaderTitle}>
+                      Starting attendance
+                    </AppText>
+                    <AppText variant="caption" tone="muted">
+                      {profile.baseline_held > 0 && profile.baseline_date
+                        ? `${profile.baseline_attended} of ${profile.baseline_held} as of ${formatFriendlyDateLabel(profile.baseline_date)}`
+                        : 'Not set'}
+                    </AppText>
+                  </View>
+                </View>
+
+                <Button
+                  title={
+                    profile.baseline_held > 0 && profile.baseline_date
+                      ? 'Edit starting attendance'
+                      : 'Set starting attendance'
+                  }
+                  variant="secondary"
+                  fullWidth
+                  disabled={actionBusy}
+                  onPress={() => router.push('/starting-attendance')}
+                />
+              </Card>
+
+              <Card style={styles.sectionCard}>
+                <View style={styles.cardHeaderRow}>
+                  <View style={styles.iconBox}>
+                    <Ionicons
+                      name="time-outline"
+                      size={18}
+                      color={colors.accent}
+                    />
+                  </View>
+                  <View style={styles.cardHeaderInfo}>
+                    <AppText variant="label" style={styles.cardHeaderTitle}>
+                      Past attendance
+                    </AppText>
+                    <AppText variant="caption" tone="muted">
+                      Enter subject starting counts or estimate them from your timetable
+                    </AppText>
+                  </View>
+                </View>
+
+                <Button
+                  title="Add past attendance"
+                  variant="secondary"
+                  fullWidth
+                  disabled={actionBusy}
+                  onPress={() => router.push('/past-attendance')}
+                />
               </Card>
             </View>
 
