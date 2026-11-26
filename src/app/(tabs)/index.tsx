@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 
 import { AppText } from '@/components/ui/AppText';
+import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -22,11 +23,11 @@ import { fetchLogsForDate } from '@/data/logs';
 import {
   canSkip,
   clampTarget,
-  combineCounts,
   formatDisplayPercent,
   formatPercentSpoken,
   getAttendanceLevel,
   getAttendanceRatio,
+  getInsightText,
   levelToTone,
   meetsTarget,
   mustAttend,
@@ -34,6 +35,7 @@ import {
   type AttendanceTone,
 } from '@/lib/attendance';
 import {
+  formatFriendlyDateLabel,
   formatTime12Hour,
   getIsoWeekday,
   getTodayDateString,
@@ -41,6 +43,10 @@ import {
   SHORT_MONTHS,
   timeStringToMinutes,
 } from '@/lib/dates';
+import {
+  readOverviewBaselineHintDismissed,
+  writeOverviewBaselineHintDismissed,
+} from '@/lib/prefs';
 import { colors, radius, spacing } from '@/theme/tokens';
 import { type AttendanceLog } from '@/types/db';
 
@@ -78,13 +84,26 @@ function getFormattedTodayHeader(): string {
 }
 
 export default function OverviewScreen() {
-  const { profile } = useAuth();
-  const { status, error, subjects, slots, statsBySubject, reload, reloadStats } =
-    useData();
+  const { user, profile } = useAuth();
+  const {
+    status,
+    error,
+    subjects,
+    slots,
+    statsBySubject,
+    overall,
+    trackedSince,
+    reload,
+    reloadStats,
+  } = useData();
 
   const [todayLogs, setTodayLogs] = useState<AttendanceLog[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<SubjectFilter>('all');
+  const [hintState, setHintState] = useState<{
+    userId: string | null;
+    dismissed: boolean;
+  }>({ userId: null, dismissed: true });
 
   const mountedRef = useRef(true);
   const logsFetchIdRef = useRef(0);
@@ -96,6 +115,36 @@ export default function OverviewScreen() {
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) {
+      return;
+    }
+
+    let cancelled = false;
+    void readOverviewBaselineHintDismissed(userId).then((dismissed) => {
+      if (!cancelled && mountedRef.current) {
+        setHintState({ userId, dismissed });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const handleDismissHint = () => {
+    const userId = user?.id;
+    if (!userId) {
+      return;
+    }
+    setHintState({ userId, dismissed: true });
+    void writeOverviewBaselineHintDismissed(userId, true);
+  };
+
+  const hintLoaded = Boolean(user?.id && hintState.userId === user.id);
+  const hintDismissed = !hintLoaded || hintState.dismissed;
 
   const loadTodayLogs = useCallback(async () => {
     const requestId = ++logsFetchIdRef.current;
@@ -181,17 +230,6 @@ export default function OverviewScreen() {
     });
   }, [subjects, statsBySubject]);
 
-  const overall = useMemo(
-    () =>
-      combineCounts(
-        subjectSummaries.map((item) => ({
-          attended: item.attended,
-          held: item.held,
-        }))
-      ),
-    [subjectSummaries]
-  );
-
   const overallLevel = getAttendanceLevel(
     overall.attended,
     overall.held,
@@ -204,13 +242,31 @@ export default function OverviewScreen() {
 
   const overallCanSkip = useMemo(
     () => canSkip(overall.attended, overall.held, defaultTarget),
-    [overall, defaultTarget]
+    [overall.attended, overall.held, defaultTarget]
   );
 
   const overallMustAttend = useMemo(
     () => mustAttend(overall.attended, overall.held, defaultTarget),
-    [overall, defaultTarget]
+    [overall.attended, overall.held, defaultTarget]
   );
+
+  const overallInsight = useMemo(
+    () => getInsightText(overall.attended, overall.held, defaultTarget),
+    [overall.attended, overall.held, defaultTarget]
+  );
+
+  const overallCaption = useMemo(() => {
+    if (overall.mode === 'college' && overall.asOfDate) {
+      return `College number up to ${formatFriendlyDateLabel(overall.asOfDate)} plus the classes you marked since.`;
+    }
+    return `Counted from the classes you marked since ${formatFriendlyDateLabel(trackedSince)}.`;
+  }, [overall.mode, overall.asOfDate, trackedSince]);
+
+  const showBaselineHint =
+    status === 'ready' &&
+    overall.mode === 'tracked' &&
+    hintLoaded &&
+    !hintDismissed;
 
   const belowTargetSubjects = useMemo(
     () => subjectSummaries.filter((item) => item.level === 'below'),
@@ -428,14 +484,114 @@ export default function OverviewScreen() {
             style={styles.stateCard}
           />
         ) : subjects.length === 0 ? (
-          <EmptyState
-            icon="grid-outline"
-            title="No subjects tracked yet"
-            message="Add your subjects and weekly timetable to track attendance, calculate bunk limits, and get proactive warnings."
-            actionLabel="Add your first subject"
-            onAction={() => router.navigate('/(tabs)/subjects')}
-            style={styles.stateCard}
-          />
+          <View style={styles.dashboardBody}>
+            {overall.mode === 'college' ? (
+              <Card style={styles.heroCard}>
+                <View style={styles.heroTopRow}>
+                  <View
+                    style={[
+                      styles.heroStatusChip,
+                      { backgroundColor: heroBadgeConfig.bgColor },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.heroStatusDot,
+                        { backgroundColor: heroBadgeConfig.dotColor },
+                      ]}
+                    />
+                    <AppText
+                      variant="caption"
+                      style={[
+                        styles.heroStatusText,
+                        { color: heroBadgeConfig.textColor },
+                      ]}
+                    >
+                      {heroBadgeConfig.label}
+                    </AppText>
+                  </View>
+
+                  <View style={styles.heroTargetPill}>
+                    <Ionicons name="flag" size={12} color={colors.textMuted} />
+                    <AppText variant="caption" tone="muted" style={styles.heroTargetText}>
+                      Target {defaultTarget}%
+                    </AppText>
+                  </View>
+                </View>
+
+                <View style={styles.heroBodyRow}>
+                  <View style={styles.heroRingWrapper}>
+                    <ProgressRing
+                      value={overallRatio}
+                      target={defaultTarget}
+                      size={112}
+                      strokeWidth={11}
+                      tone={overallTone}
+                      label={overallDisplay}
+                      accessibilityLabel={`Overall attendance, ${overallSpoken}, target ${defaultTarget} percent`}
+                    />
+                  </View>
+
+                  <View style={styles.heroSummaryCol}>
+                    <View style={styles.heroMetricsRow}>
+                      <View style={styles.heroMetricItem}>
+                        <AppText variant="caption" tone="muted">
+                          Attended
+                        </AppText>
+                        <AppText variant="heading" style={styles.heroMetricValue}>
+                          {overall.attended}
+                          <AppText variant="body" tone="muted">
+                            /{overall.held}
+                          </AppText>
+                        </AppText>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+
+                <AppText variant="caption" tone="muted" style={styles.overallCaption}>
+                  {overallCaption}
+                </AppText>
+
+                <View style={styles.overallInsightBox}>
+                  <AppText variant="body" style={styles.overallInsightText}>
+                    {overallInsight}
+                  </AppText>
+                </View>
+              </Card>
+            ) : null}
+
+            <EmptyState
+              icon="grid-outline"
+              title="No subjects tracked yet"
+              message="Add your subjects and weekly timetable to track attendance, calculate bunk limits, and get proactive warnings."
+              actionLabel="Add your first subject"
+              onAction={() => router.navigate('/(tabs)/subjects')}
+              secondaryActionLabel="Set up from your timetable"
+              onSecondaryAction={() => router.push('/timetable-import')}
+              style={styles.stateCard}
+            />
+
+            {showBaselineHint ? (
+              <Card style={styles.hintCard}>
+                <AppText variant="body" style={styles.hintCardText}>
+                  Does your college portal show only overall attendance? Add that
+                  number so your overall matches.
+                </AppText>
+                <View style={styles.hintCardActions}>
+                  <Button
+                    title="Add number"
+                    onPress={() => router.push('/starting-attendance')}
+                  />
+                  <Button
+                    title="Dismiss"
+                    variant="secondary"
+                    onPress={handleDismissHint}
+                  />
+                </View>
+              </Card>
+            ) : null}
+          </View>
         ) : (
           <View style={styles.dashboardBody}>
             {/* 1. HERO COMMAND CARD */}
@@ -548,7 +704,7 @@ export default function OverviewScreen() {
                           : overallLevel === 'below'
                             ? `Needed to reach ${defaultTarget}% target`
                             : overallCanSkip > 0
-                              ? `Overall safely before dropping`
+                              ? 'Overall safely before dropping'
                               : 'Attendance is right on target'}
                       </AppText>
                     </View>
@@ -587,6 +743,25 @@ export default function OverviewScreen() {
                   </View>
                 </View>
               </View>
+
+              <AppText variant="caption" tone="muted" style={styles.overallCaption}>
+                {overallCaption}
+              </AppText>
+
+              <View style={styles.overallInsightBox}>
+                <AppText variant="body" style={styles.overallInsightText}>
+                  {overallInsight}
+                </AppText>
+              </View>
+
+              {overall.mode === 'tracked' ? (
+                <Button
+                  title="Add your college number"
+                  variant="ghost"
+                  onPress={() => router.push('/starting-attendance')}
+                  style={styles.addCollegeBtn}
+                />
+              ) : null}
 
               {/* Linear Benchmark Bar */}
               {overall.held > 0 && (
@@ -638,6 +813,26 @@ export default function OverviewScreen() {
                 </View>
               )}
             </Card>
+
+            {showBaselineHint ? (
+              <Card style={styles.hintCard}>
+                <AppText variant="body" style={styles.hintCardText}>
+                  Does your college portal show only overall attendance? Add that
+                  number so your overall matches.
+                </AppText>
+                <View style={styles.hintCardActions}>
+                  <Button
+                    title="Add number"
+                    onPress={() => router.push('/starting-attendance')}
+                  />
+                  <Button
+                    title="Dismiss"
+                    variant="secondary"
+                    onPress={handleDismissHint}
+                  />
+                </View>
+              </Card>
+            ) : null}
 
             {/* 2. TODAY'S ACTION BANNER */}
             <Card
@@ -1210,6 +1405,34 @@ const styles = StyleSheet.create({
     height: 24,
     backgroundColor: colors.border,
     marginHorizontal: spacing.sm,
+  },
+  overallCaption: {
+    lineHeight: 18,
+  },
+  overallInsightBox: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.control,
+    padding: spacing.md,
+  },
+  overallInsightText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  addCollegeBtn: {
+    alignSelf: 'flex-start',
+  },
+  hintCard: {
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  hintCardText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  hintCardActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
   benchmarkWrapper: {
     gap: spacing.xs,
