@@ -47,6 +47,9 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "verify:math": "npx tsx scripts/verify-attendance.ts",
+    "verify:parser": "npx tsx scripts/verify-timetable-parser.ts",
+    "verify:overall": "npx tsx scripts/verify-overall.ts",
+    "verify:dates": "npx tsx scripts/verify-dates.ts",
     "audit": "node scripts/audit.mjs"
   },
   "private": true
