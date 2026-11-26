@@ -266,6 +266,14 @@ export default function SubjectsScreen() {
                 />
               ) : (
                 <View style={styles.subjectsList}>
+                  <View style={styles.subjectsTopBar}>
+                    <Button
+                      title="Add past attendance"
+                      variant="secondary"
+                      icon="time-outline"
+                      onPress={() => router.push('/past-attendance')}
+                    />
+                  </View>
                   {subjects.map((subject) => {
                     const count = slotCountBySubject[subject.id] ?? 0;
                     const stats = statsBySubject[subject.id];
@@ -739,6 +747,9 @@ const styles = StyleSheet.create({
   subjectsList: {
     marginTop: spacing.lg,
     gap: spacing.md,
+  },
+  subjectsTopBar: {
+    alignItems: 'flex-start',
   },
   subjectCard: {
     padding: spacing.md,
