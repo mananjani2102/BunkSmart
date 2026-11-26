@@ -2,12 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
 
+import { GoToDateModal } from '@/components/GoToDateModal';
 import { TodayClassCard } from '@/components/TodayClassCard';
 import { AppText } from '@/components/ui/AppText';
 import { Card } from '@/components/ui/Card';
@@ -20,7 +22,9 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { useData } from '@/context/DataProvider';
 import {
   clearLogStatus,
+  deleteLogsForDate,
   fetchLogsForDate,
+  setDateLogsStatusBatch,
   setSlotLogStatus,
 } from '@/data/logs';
 import {
@@ -107,6 +111,8 @@ export default function TodayScreen() {
   );
   const [logsLoading, setLogsLoading] = useState(true);
   const [pendingSlots, setPendingSlots] = useState<Record<string, boolean>>({});
+  const [bulkPending, setBulkPending] = useState(false);
+  const [dateModalVisible, setDateModalVisible] = useState(false);
   const [bannerError, setBannerError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -114,6 +120,7 @@ export default function TodayScreen() {
   const fetchIdRef = useRef(0);
   const selectedDateRef = useRef(selectedDate);
   const pendingSlotsRef = useRef<Record<string, boolean>>({});
+  const bulkPendingRef = useRef(false);
   const refreshingRef = useRef(false);
   const logsCacheRef = useRef<Record<string, AttendanceLog[]>>({});
 
@@ -224,7 +231,11 @@ export default function TodayScreen() {
   const unmarkedCount = Math.max(0, daySlots.length - markedCount);
 
   const isToday = selectedDate === today;
+  const isFutureDate = selectedDate > today;
   const canGoNext = selectedDate < today;
+  const hasPendingSlot = Object.keys(pendingSlots).length > 0;
+  const quickActionDisabled =
+    isFutureDate || logsLoading || bulkPending || hasPendingSlot;
 
   const handlePreviousDay = () => {
     setBannerError(null);
@@ -274,7 +285,11 @@ export default function TodayScreen() {
     subject: Subject,
     nextStatus: AttendanceStatus
   ) => {
-    if (pendingSlotsRef.current[slot.id] || pendingSlots[slot.id]) {
+    if (
+      bulkPendingRef.current ||
+      pendingSlotsRef.current[slot.id] ||
+      pendingSlots[slot.id]
+    ) {
       return;
     }
 
@@ -291,7 +306,8 @@ export default function TodayScreen() {
     applyOptimisticAttendanceChange(
       subject.id,
       previousLog?.status ?? null,
-      nextAttendanceStatus
+      nextAttendanceStatus,
+      targetDate
     );
 
     // 2. Instantly update slot button UI
@@ -342,7 +358,8 @@ export default function TodayScreen() {
       applyOptimisticAttendanceChange(
         subject.id,
         nextAttendanceStatus,
-        previousLog?.status ?? null
+        previousLog?.status ?? null,
+        targetDate
       );
       if (mountedRef.current && selectedDateRef.current === targetDate) {
         setLogsBySlot((prev) => {
@@ -368,6 +385,109 @@ export default function TodayScreen() {
     }
   };
 
+  const handleBatchStatus = async (nextStatus: AttendanceStatus) => {
+    const currentToday = getTodayDateString();
+    const targetDate = selectedDate;
+    if (
+      targetDate > currentToday ||
+      daySlots.length === 0 ||
+      bulkPendingRef.current ||
+      Object.keys(pendingSlotsRef.current).length > 0
+    ) {
+      return;
+    }
+
+    bulkPendingRef.current = true;
+    setBulkPending(true);
+    setBannerError(null);
+
+    try {
+      const savedLogs = await setDateLogsStatusBatch(
+        daySlots.map((slot) => ({
+          subject_id: slot.subject_id,
+          slot_id: slot.id,
+          log_date: targetDate,
+          status: nextStatus,
+        }))
+      );
+      logsCacheRef.current[targetDate] = savedLogs;
+      if (mountedRef.current && selectedDateRef.current === targetDate) {
+        setLogsBySlot(mapLogsBySlot(savedLogs));
+      }
+      await reloadStats();
+    } catch (err) {
+      if (!(err instanceof AppError)) {
+        console.error('Batch attendance update failed:', err);
+      }
+      if (mountedRef.current) {
+        setBannerError(getFriendlyErrorMessage(err));
+      }
+    } finally {
+      bulkPendingRef.current = false;
+      if (mountedRef.current) {
+        setBulkPending(false);
+      }
+    }
+  };
+
+  const handleClearDay = async () => {
+    const currentToday = getTodayDateString();
+    const targetDate = selectedDate;
+    if (
+      targetDate > currentToday ||
+      bulkPendingRef.current ||
+      Object.keys(pendingSlotsRef.current).length > 0
+    ) {
+      return;
+    }
+
+    bulkPendingRef.current = true;
+    setBulkPending(true);
+    setBannerError(null);
+
+    try {
+      await deleteLogsForDate(targetDate);
+      logsCacheRef.current[targetDate] = [];
+      if (mountedRef.current && selectedDateRef.current === targetDate) {
+        setLogsBySlot({});
+      }
+      await reloadStats();
+    } catch (err) {
+      if (!(err instanceof AppError)) {
+        console.error('Clear day logs failed:', err);
+      }
+      if (mountedRef.current) {
+        setBannerError(getFriendlyErrorMessage(err));
+      }
+    } finally {
+      bulkPendingRef.current = false;
+      if (mountedRef.current) {
+        setBulkPending(false);
+      }
+    }
+  };
+
+  const handleConfirmClearDay = () => {
+    if (
+      selectedDate > getTodayDateString() ||
+      bulkPendingRef.current ||
+      Object.keys(pendingSlotsRef.current).length > 0
+    ) {
+      return;
+    }
+
+    Alert.alert('Clear day', 'Remove all marks for this day?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: () => {
+          void handleClearDay();
+        },
+      },
+    ]);
+  };
+
   const formattedDaySubtitle = getFormattedDaySubtitle(selectedDate);
 
   return (
@@ -387,6 +507,28 @@ export default function TodayScreen() {
       >
         {/* Date Navigator Card */}
         <Card style={styles.dateNavigatorCard}>
+          <View style={styles.dateHeaderTopRow}>
+            <PressableScale
+              onPress={() => setDateModalVisible(true)}
+              disabled={bulkPending}
+              scaleTo={0.96}
+              rippleColor={colors.rippleNeutral}
+              accessibilityRole="button"
+              accessibilityLabel="Go to date"
+              containerStyle={styles.goToDateBtnContainer}
+              style={styles.goToDateBtn}
+            >
+              <Ionicons
+                name="calendar-outline"
+                size={16}
+                color={colors.accent}
+              />
+              <AppText variant="label" style={styles.goToDateText}>
+                Go to date
+              </AppText>
+            </PressableScale>
+          </View>
+
           <View style={styles.navRow}>
             <PressableScale
               onPress={handlePreviousDay}
@@ -608,6 +750,109 @@ export default function TodayScreen() {
                   </View>
                 </Card>
 
+                {/* Quick Actions */}
+                {!isFutureDate && !logsLoading ? (
+                  <View style={styles.quickActionsRow}>
+                    <PressableScale
+                      onPress={() => {
+                        void handleBatchStatus('present');
+                      }}
+                      disabled={quickActionDisabled}
+                      scaleTo={0.96}
+                      rippleColor={colors.rippleNeutral}
+                      accessibilityRole="button"
+                      accessibilityLabel="All present"
+                      containerStyle={[
+                        styles.quickActionBtnContainer,
+                        styles.quickActionSafe,
+                        quickActionDisabled && styles.quickActionDisabled,
+                      ]}
+                      style={styles.quickActionBtn}
+                    >
+                      <AppText
+                        variant="caption"
+                        style={[styles.quickActionText, { color: colors.safe }]}
+                      >
+                        All present
+                      </AppText>
+                    </PressableScale>
+
+                    <PressableScale
+                      onPress={() => {
+                        void handleBatchStatus('absent');
+                      }}
+                      disabled={quickActionDisabled}
+                      scaleTo={0.96}
+                      rippleColor={colors.rippleNeutral}
+                      accessibilityRole="button"
+                      accessibilityLabel="All absent"
+                      containerStyle={[
+                        styles.quickActionBtnContainer,
+                        styles.quickActionDanger,
+                        quickActionDisabled && styles.quickActionDisabled,
+                      ]}
+                      style={styles.quickActionBtn}
+                    >
+                      <AppText
+                        variant="caption"
+                        style={[
+                          styles.quickActionText,
+                          { color: colors.danger },
+                        ]}
+                      >
+                        All absent
+                      </AppText>
+                    </PressableScale>
+
+                    <PressableScale
+                      onPress={() => {
+                        void handleBatchStatus('cancelled');
+                      }}
+                      disabled={quickActionDisabled}
+                      scaleTo={0.96}
+                      rippleColor={colors.rippleNeutral}
+                      accessibilityRole="button"
+                      accessibilityLabel="Holiday (all cancelled)"
+                      containerStyle={[
+                        styles.quickActionBtnContainer,
+                        styles.quickActionMuted,
+                        quickActionDisabled && styles.quickActionDisabled,
+                      ]}
+                      style={styles.quickActionBtn}
+                    >
+                      <AppText
+                        variant="caption"
+                        tone="muted"
+                        style={styles.quickActionText}
+                      >
+                        Holiday (all cancelled)
+                      </AppText>
+                    </PressableScale>
+
+                    <PressableScale
+                      onPress={handleConfirmClearDay}
+                      disabled={quickActionDisabled}
+                      scaleTo={0.96}
+                      rippleColor={colors.rippleNeutral}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear day"
+                      containerStyle={[
+                        styles.quickActionBtnContainer,
+                        styles.quickActionClear,
+                        quickActionDisabled && styles.quickActionDisabled,
+                      ]}
+                      style={styles.quickActionBtn}
+                    >
+                      <AppText
+                        variant="caption"
+                        style={styles.quickActionText}
+                      >
+                        Clear day
+                      </AppText>
+                    </PressableScale>
+                  </View>
+                ) : null}
+
                 {/* Class Schedule Cards */}
                 {logsLoading ? (
                   daySlots.map((slot) => (
@@ -650,7 +895,7 @@ export default function TodayScreen() {
                         subject={subject}
                         counts={counts}
                         status={currentStatus}
-                        pending={Boolean(pendingSlots[slot.id])}
+                        pending={bulkPending || Boolean(pendingSlots[slot.id])}
                         onSelectStatus={(nextStatus) => {
                           void handleSelectStatus(slot, subject, nextStatus);
                         }}
@@ -671,6 +916,15 @@ export default function TodayScreen() {
           </FadeView>
         )}
       </ScrollView>
+
+      <GoToDateModal
+        visible={dateModalVisible}
+        onClose={() => setDateModalVisible(false)}
+        onSelectDate={(nextDate) => {
+          setBannerError(null);
+          setSelectedDate(nextDate);
+        }}
+      />
     </Screen>
   );
 }
@@ -688,6 +942,31 @@ const styles = StyleSheet.create({
   dateNavigatorCard: {
     padding: spacing.md,
     backgroundColor: colors.surface,
+    gap: spacing.sm,
+  },
+  dateHeaderTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  goToDateBtnContainer: {
+    minHeight: 44,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    overflow: 'hidden',
+  },
+  goToDateBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs + 2,
+    paddingHorizontal: spacing.md,
+  },
+  goToDateText: {
+    color: colors.accent,
+    fontWeight: '600',
   },
   navRow: {
     flexDirection: 'row',
@@ -863,5 +1142,44 @@ const styles = StyleSheet.create({
   },
   hintText: {
     fontSize: 12,
+  },
+  quickActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs + 2,
+  },
+  quickActionBtnContainer: {
+    minHeight: 44,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  quickActionBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  quickActionSafe: {
+    backgroundColor: colors.safeBg,
+    borderColor: colors.safeBg,
+  },
+  quickActionDanger: {
+    backgroundColor: colors.dangerBg,
+    borderColor: colors.dangerBg,
+  },
+  quickActionMuted: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+  },
+  quickActionClear: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+  },
+  quickActionDisabled: {
+    opacity: 0.55,
+  },
+  quickActionText: {
+    fontWeight: '600',
   },
 });
