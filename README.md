@@ -4,6 +4,8 @@ BunkSmart tracks your class attendance per subject against a target percentage y
 
 ## How the numbers work
 
+Subject percentages count only the classes marked in BunkSmart plus any starting counts the student enters. When a college overall number is entered, the overall number is that college figure plus the classes marked after the chosen date; otherwise, the overall number sums the tracked subjects.
+
 Each subject tracks attended classes (`A`), held classes (`H`), and a target percentage (`T`, from 50 to 95). Cancelled classes are recorded in your history and totals, but they never count toward held classes.
 
 When your attendance is at or above target (`100 * A >= T * H`):
@@ -23,10 +25,11 @@ Example: with 18 attended out of 22 held classes and a 75 percent target, `100 *
 ## Features
 
 - Email and password sign up, login, and sign out backed by Supabase Auth.
-- Subject management with per-subject target percentages and optional initial attended and held counts.
-- Weekly timetable organized by weekday with start and optional end times.
-- Daily attendance marking on Today (present, absent, or cancelled), with date navigation back through past days and tap-again to clear.
-- Overview dashboard showing overall attendance, today's unmarked count, subjects below target, and per-subject progress rings.
+- Subject management with per-subject target percentages and optional starting attended and held counts.
+- Weekly timetable organized by weekday with start and optional end times, plus timetable import from pasted text.
+- Optional past attendance entry, either by entering known attended and held counts or by estimating from the timetable and missed classes.
+- Daily attendance marking on Today (present, absent, or cancelled), with whole-day quick actions (all present, all absent, holiday, clear day), date navigation, a go-to-date option, and tap-again to clear.
+- Overview dashboard showing an overall number that can start from your college portal figure (or sum tracked classes), today's unmarked count, subjects below target, and per-subject progress rings.
 - Subject detail view with skip or recovery guidance, present/absent/cancelled totals, attendance trend chart, and filterable log history.
 - What-if simulator (both per-subject and standalone) to test skipping or attending upcoming classes before they happen.
 - Local class reminders scheduled on the device before scheduled timetable slots, with configurable lead time.
@@ -69,7 +72,7 @@ src/types/                Database and asset TypeScript types
    ```
 
 3. Copy `.env.example` to `.env` and fill in your Supabase project URL (`EXPO_PUBLIC_SUPABASE_URL`) and publishable key (`EXPO_PUBLIC_SUPABASE_KEY`).
-4. Open the Supabase SQL Editor for your project and run `supabase/schema.sql`.
+4. Open the Supabase SQL Editor for your project, run `supabase/schema.sql`, and then also run the Migration 2 section of the same file.
 5. In the Supabase dashboard, open **Authentication**, **Sign In / Providers**, **Email**, and turn off **Confirm email**.
 6. Start the development server:
 
@@ -95,6 +98,7 @@ src/types/                Database and asset TypeScript types
 
 ## Known limitations
 
+- Timetable estimates do not know about holidays or cancelled classes, so adjust estimated held counts manually when needed.
 - Past dates on the Today screen display your current timetable rather than a historical snapshot of past timetable changes.
 - Class reminders are scheduled locally on one device only and do not sync across devices.
 - Free Supabase projects pause automatically after a week of inactivity.
