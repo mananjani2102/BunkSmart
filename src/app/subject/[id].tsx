@@ -12,6 +12,7 @@ import { HistoryList } from '@/components/HistoryList';
 import { TrendChart } from '@/components/TrendChart';
 import { WhatIfSimulator } from '@/components/WhatIfSimulator';
 import { AppText } from '@/components/ui/AppText';
+import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -197,6 +198,8 @@ export default function SubjectDetailScreen() {
   const tone = levelToTone(level);
   const insight = getInsightText(attended, held, target);
   const spokenPercent = formatPercentSpoken(attended, held);
+  const hasStartingCounts =
+    subject.initial_total > 0 || subject.initial_present > 0;
 
   return (
     <Screen scroll edges={DETAIL_EDGES} contentContainerStyle={styles.content}>
@@ -248,11 +251,24 @@ export default function SubjectDetailScreen() {
               Target {target}%
             </AppText>
           </View>
+          <AppText variant="caption" tone="muted" style={styles.sourceCaption}>
+            {hasStartingCounts
+              ? 'Includes the starting counts you entered.'
+              : 'Counts only the classes you marked in BunkSmart.'}
+          </AppText>
         </View>
 
         <View style={styles.insightBox}>
           <AppText variant="body">{insight}</AppText>
         </View>
+
+        <Button
+          title="Add past attendance"
+          variant="secondary"
+          icon="time-outline"
+          fullWidth
+          onPress={() => router.push('/past-attendance')}
+        />
       </Card>
 
       <WhatIfSimulator
@@ -388,6 +404,10 @@ const styles = StyleSheet.create({
   metaSubRow: {
     flexDirection: 'row',
     gap: spacing.lg,
+  },
+  sourceCaption: {
+    textAlign: 'center',
+    marginTop: spacing.xs,
   },
   insightBox: {
     backgroundColor: colors.surfaceMuted,
