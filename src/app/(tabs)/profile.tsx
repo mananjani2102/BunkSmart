@@ -1,50 +1,69 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { RemindersCard } from '@/components/RemindersCard';
+import { ProfileSkeleton } from '@/components/SkeletonLayouts';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { PressableScale } from '@/components/ui/PressableScale';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { ContentFade } from '@/components/ui/ContentFade';
+import { Divider } from '@/components/ui/Divider';
+import { ListRow } from '@/components/ui/ListRow';
 import { Screen } from '@/components/ui/Screen';
-import { Skeleton } from '@/components/ui/Skeleton';
+import { Segmented, type SegmentedOption } from '@/components/ui/Segmented';
 import { Stepper } from '@/components/ui/Stepper';
-import { CONTACT_EMAIL } from '@/constants/legal';
-import { useAuth } from '@/context/AuthProvider';
-import { useData } from '@/context/DataProvider';
+import { useAuthActions, useAuthState } from '@/context/AuthProvider';
+import { useDataActions } from '@/context/DataProvider';
+import { useSnackbarActions } from '@/context/SnackbarProvider';
 import { formatFriendlyDateLabel } from '@/lib/dates';
-import { AppError, getFriendlyErrorMessage } from '@/lib/errors';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { getFriendlyErrorMessage } from '@/lib/errors';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import {
+  fontFamily,
+  radius,
+  spacing,
+  type ThemeColors,
+  type ThemeMode,
+} from '@/theme/tokens';
 
 const TARGET_PRESETS = [75, 80, 85] as const;
 
-function getUserInitials(name: string, email: string): string {
-  const clean = name.trim();
-  if (clean && clean !== 'Not set') {
-    const parts = clean.split(/\s+/);
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
-    return clean.slice(0, 2).toUpperCase();
-  }
-  return (email.slice(0, 2) || 'ST').toUpperCase();
-}
+const APPEARANCE_OPTIONS: readonly SegmentedOption<ThemeMode>[] = [
+  { label: 'System', value: 'system' },
+  { label: 'Light', value: 'light' },
+  { label: 'Dark', value: 'dark' },
+];
 
 export default function ProfileScreen() {
-  const { user, profile, signOut, updateProfile } = useAuth();
-  const { deleteAllAttendanceData } = useData();
+  const { colors, scheme, mode, setMode } = useTheme();
+  const styles = createStyles(colors, scheme);
+  const { user, profile } = useAuthState();
+  const { signOut, updateProfile } = useAuthActions();
+  const { deleteAllAttendanceData } = useDataActions();
+  const { showSnackbar } = useSnackbarActions();
 
   const [signingOut, setSigningOut] = useState(false);
   const [savingTarget, setSavingTarget] = useState(false);
   const [deletingData, setDeletingData] = useState(false);
+  const [targetExpanded, setTargetExpanded] = useState(false);
+  const [resetModalVisible, setResetModalVisible] = useState(false);
   const [pendingTarget, setPendingTarget] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
   const signingOutRef = useRef(false);
   const savingTargetRef = useRef(false);
   const deletingDataRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const metadataName =
     typeof user?.user_metadata?.full_name === 'string'
@@ -52,9 +71,13 @@ export default function ProfileScreen() {
       : '';
   const displayName = profile?.full_name.trim() || metadataName || 'Student';
   const displayEmail = user?.email ?? 'Account Email';
-  const initials = getUserInitials(displayName, displayEmail);
   const currentTarget = pendingTarget ?? profile?.default_target ?? 75;
   const actionBusy = signingOut || savingTarget || deletingData;
+
+  const startingAttendanceText =
+    profile && profile.baseline_held > 0 && profile.baseline_date
+      ? `${profile.baseline_attended} of ${profile.baseline_held} as of ${formatFriendlyDateLabel(profile.baseline_date)}`
+      : 'Not set';
 
   const handleDefaultTargetChange = async (nextTarget: number) => {
     if (
@@ -74,11 +97,11 @@ export default function ProfileScreen() {
 
     try {
       await updateProfile({ default_target: nextTarget });
+      showSnackbar(`Default target saved (${nextTarget}%).`);
     } catch (err) {
-      if (!(err instanceof AppError)) {
-        console.error('Update default target failed:', err);
-      }
-      setErrorMessage(getFriendlyErrorMessage(err));
+      const message = getFriendlyErrorMessage(err);
+      setErrorMessage(message);
+      showSnackbar({ message, tone: 'error' });
     } finally {
       savingTargetRef.current = false;
       setSavingTarget(false);
@@ -97,11 +120,12 @@ export default function ProfileScreen() {
 
     try {
       await deleteAllAttendanceData();
+      setResetModalVisible(false);
+      showSnackbar('All attendance data deleted.');
     } catch (err) {
-      if (!(err instanceof AppError)) {
-        console.error('Delete all attendance data failed:', err);
-      }
-      setErrorMessage(getFriendlyErrorMessage(err));
+      const message = getFriendlyErrorMessage(err);
+      setErrorMessage(message);
+      showSnackbar({ message, tone: 'error' });
     } finally {
       deletingDataRef.current = false;
       setDeletingData(false);
@@ -113,20 +137,8 @@ export default function ProfileScreen() {
       return;
     }
 
-    Alert.alert(
-      'Reset All Attendance Data',
-      'This action will permanently delete every subject, timetable slot, and attendance record. Your account login remains active.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset Data',
-          style: 'destructive',
-          onPress: () => {
-            void handleDeleteAllData();
-          },
-        },
-      ]
-    );
+    setErrorMessage(null);
+    setResetModalVisible(true);
   };
 
   const handleSignOut = async () => {
@@ -141,8 +153,9 @@ export default function ProfileScreen() {
     try {
       await signOut();
     } catch (err) {
-      console.error('Sign out failed:', err);
-      setErrorMessage(getFriendlyErrorMessage(err));
+      const message = getFriendlyErrorMessage(err);
+      setErrorMessage(message);
+      showSnackbar({ message, tone: 'error' });
     } finally {
       signingOutRef.current = false;
       setSigningOut(false);
@@ -152,638 +165,288 @@ export default function ProfileScreen() {
   return (
     <Screen scroll contentContainerStyle={styles.scrollContent}>
       <View style={styles.container}>
-        {/* Page Title */}
-        <View style={styles.titleGroup}>
-          <AppText variant="title">Settings & Profile</AppText>
-          <AppText variant="caption" tone="muted">
-            Manage your account preferences and academic goals
-          </AppText>
-        </View>
+        <AppText variant="title">Profile</AppText>
 
-        {!profile ? (
-          <View
-            accessible
-            accessibilityLabel="Loading settings"
-            style={styles.skeletonSection}
-          >
-            {/* Identity Card Skeleton */}
-            <Card style={styles.identityCard}>
-              <View style={styles.identityRow}>
-                <Skeleton width={60} height={60} borderRadius={30} />
-                <View style={styles.identityTextGroup}>
-                  <Skeleton width="55%" height={22} />
-                  <Skeleton width="75%" height={16} />
-                  <Skeleton width="40%" height={20} borderRadius={10} />
-                </View>
-              </View>
-            </Card>
-
-            {/* Target Card Skeleton */}
-            <Card style={styles.sectionCard}>
-              <Skeleton width="60%" height={20} />
-              <Skeleton width="85%" height={14} style={{ marginTop: 6 }} />
-              <Skeleton width="100%" height={48} borderRadius={radius.control} style={{ marginTop: 16 }} />
-            </Card>
-
-            {/* Reminders Card Skeleton */}
-            <Card style={styles.sectionCard}>
-              <Skeleton width="50%" height={20} />
-              <Skeleton width="100%" height={44} borderRadius={radius.control} style={{ marginTop: 14 }} />
-            </Card>
-          </View>
-        ) : (
-          <View style={styles.contentGroup}>
-            {/* 1. IDENTITY CARD */}
-            <Card style={styles.identityCard}>
-              <View style={styles.identityRow}>
-                <View style={styles.avatarCircle}>
-                  <AppText variant="heading" style={styles.avatarInitials}>
-                    {initials}
-                  </AppText>
-                </View>
-                <View style={styles.identityTextGroup}>
-                  <AppText variant="heading" numberOfLines={1} style={styles.userName}>
-                    {displayName}
-                  </AppText>
-                  <AppText variant="caption" tone="muted" numberOfLines={1} style={styles.userEmail}>
-                    {displayEmail}
-                  </AppText>
-                  <View style={styles.statusPill}>
-                    <View style={styles.statusDot} />
-                    <AppText variant="caption" style={styles.statusPillText}>
-                      Cloud Sync Active
-                    </AppText>
-                  </View>
-                </View>
-              </View>
-            </Card>
-
-            {/* 2. ACADEMIC GOALS SECTION */}
+        <ContentFade loading={!profile} fallback={<ProfileSkeleton />}>
+          {profile ? (
+            <View style={styles.contentGroup}>
+            {/* Account */}
             <View style={styles.section}>
               <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
-                ACADEMIC GOALS
+                Account
               </AppText>
+              <Card style={styles.groupedCard}>
+                <ListRow title="Name" rightText={displayName} />
+                <Divider />
+                <ListRow title="Email" rightText={displayEmail} />
+              </Card>
+            </View>
 
-              <Card style={styles.sectionCard}>
-                <View style={styles.cardHeaderRow}>
-                  <View style={styles.iconBox}>
-                    <Ionicons
-                      name="speedometer-outline"
-                      size={18}
-                      color={colors.accent}
+            {/* Attendance */}
+            <View style={styles.section}>
+              <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
+                Attendance
+              </AppText>
+              <Card style={styles.groupedCard}>
+                <ListRow
+                  title="Default target"
+                  rightText={savingTarget ? 'Saving...' : `${currentTarget}%`}
+                  chevron
+                  disabled={actionBusy}
+                  onPress={() => setTargetExpanded((prev) => !prev)}
+                />
+
+                {targetExpanded ? (
+                  <View style={styles.targetEditor}>
+                    <Stepper
+                      label="Target percentage"
+                      value={currentTarget}
+                      min={50}
+                      max={95}
+                      step={1}
+                      suffix="%"
+                      disabled={!profile || actionBusy}
+                      onChange={(nextValue) => {
+                        void handleDefaultTargetChange(nextValue);
+                      }}
                     />
-                  </View>
-                  <View style={styles.cardHeaderInfo}>
-                    <AppText variant="label" style={styles.cardHeaderTitle}>
-                      Default Attendance Target
-                    </AppText>
-                    <AppText variant="caption" tone="muted">
-                      Applied automatically when adding new subjects
-                    </AppText>
-                  </View>
-                  {savingTarget && (
-                    <View style={styles.savingBadge}>
-                      <AppText variant="caption" tone="muted" style={styles.savingText}>
-                        Saving...
-                      </AppText>
-                    </View>
-                  )}
-                </View>
 
-                <View style={styles.stepperContainer}>
-                  <Stepper
-                    label="Target Percentage"
-                    value={currentTarget}
-                    min={50}
-                    max={95}
-                    step={1}
-                    suffix="%"
-                    disabled={!profile || actionBusy}
-                    onChange={(nextValue) => {
-                      void handleDefaultTargetChange(nextValue);
-                    }}
-                  />
-                </View>
-
-                {/* Target Presets */}
-                <View style={styles.presetsRow}>
-                  <AppText variant="caption" tone="muted" style={styles.presetsLabel}>
-                    Standard Presets:
-                  </AppText>
-                  <View style={styles.presetChips}>
-                    {TARGET_PRESETS.map((preset) => {
-                      const isSelected = currentTarget === preset;
-                      return (
-                        <PressableScale
-                          key={`preset-${preset}`}
-                          onPress={() => {
-                            void handleDefaultTargetChange(preset);
-                          }}
-                          disabled={!profile || actionBusy}
-                          style={[
-                            styles.presetChip,
-                            isSelected && styles.presetChipActive,
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Set target to ${preset} percent`}
-                        >
-                          <AppText
-                            variant="caption"
-                            style={[
-                              styles.presetChipText,
-                              isSelected && styles.presetChipTextActive,
+                    <View style={styles.presetRow}>
+                      {TARGET_PRESETS.map((preset) => {
+                        const selected = currentTarget === preset;
+                        return (
+                          <Pressable
+                            key={`preset-${preset}`}
+                            onPress={() => {
+                              void handleDefaultTargetChange(preset);
+                            }}
+                            disabled={!profile || actionBusy}
+                            android_ripple={{
+                              color: selected
+                                ? colors.ripplePrimary
+                                : colors.rippleNeutral,
+                              foreground: true,
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Set target to ${preset} percent`}
+                            accessibilityState={{ selected }}
+                            style={({ pressed }) => [
+                              styles.presetBtn,
+                              selected && styles.presetBtnSelected,
+                              pressed && !selected && styles.presetBtnPressed,
                             ]}
                           >
-                            {preset}%{preset === 75 ? ' (Recommended)' : ''}
-                          </AppText>
-                        </PressableScale>
-                      );
-                    })}
+                            <AppText
+                              variant="caption"
+                              style={
+                                selected
+                                  ? styles.presetTextSelected
+                                  : styles.presetText
+                              }
+                            >
+                              {preset}%
+                            </AppText>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
                   </View>
-                </View>
-              </Card>
+                ) : null}
 
-              <Card style={styles.sectionCard}>
-                <View style={styles.cardHeaderRow}>
-                  <View style={styles.iconBox}>
-                    <Ionicons
-                      name="school-outline"
-                      size={18}
-                      color={colors.accent}
-                    />
-                  </View>
-                  <View style={styles.cardHeaderInfo}>
-                    <AppText variant="label" style={styles.cardHeaderTitle}>
-                      Starting attendance
-                    </AppText>
-                    <AppText variant="caption" tone="muted">
-                      {profile.baseline_held > 0 && profile.baseline_date
-                        ? `${profile.baseline_attended} of ${profile.baseline_held} as of ${formatFriendlyDateLabel(profile.baseline_date)}`
-                        : 'Not set'}
-                    </AppText>
-                  </View>
-                </View>
+                <Divider />
 
-                <Button
-                  title={
-                    profile.baseline_held > 0 && profile.baseline_date
-                      ? 'Edit starting attendance'
-                      : 'Set starting attendance'
-                  }
-                  variant="secondary"
-                  fullWidth
+                <ListRow
+                  title="Starting attendance"
+                  subtitle={startingAttendanceText}
+                  chevron
                   disabled={actionBusy}
                   onPress={() => router.push('/starting-attendance')}
                 />
               </Card>
-
-              <Card style={styles.sectionCard}>
-                <View style={styles.cardHeaderRow}>
-                  <View style={styles.iconBox}>
-                    <Ionicons
-                      name="time-outline"
-                      size={18}
-                      color={colors.accent}
-                    />
-                  </View>
-                  <View style={styles.cardHeaderInfo}>
-                    <AppText variant="label" style={styles.cardHeaderTitle}>
-                      Past attendance
-                    </AppText>
-                    <AppText variant="caption" tone="muted">
-                      Enter subject starting counts or estimate them from your timetable
-                    </AppText>
-                  </View>
-                </View>
-
-                <Button
-                  title="Add past attendance"
-                  variant="secondary"
-                  fullWidth
-                  disabled={actionBusy}
-                  onPress={() => router.push('/past-attendance')}
-                />
-              </Card>
             </View>
 
-            {/* 3. CLASS REMINDERS */}
+            {/* Reminders */}
             <View style={styles.section}>
               <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
-                SCHEDULE NOTIFICATIONS
+                Reminders
               </AppText>
               <RemindersCard disabled={signingOut || deletingData} />
             </View>
 
-            {/* 4. ABOUT & LEGAL SECTION */}
+            {/* Appearance */}
             <View style={styles.section}>
               <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
-                ABOUT & COMPLIANCE
+                Appearance
               </AppText>
-
-              <Card style={styles.groupedCard}>
-                {/* Privacy Policy */}
-                <PressableScale
-                  onPress={() => router.push('/legal/privacy')}
-                  scaleTo={0.99}
-                  rippleColor={colors.rippleNeutral}
-                  accessibilityRole="link"
-                  accessibilityLabel="Privacy Policy"
-                  style={styles.menuRow}
-                >
-                  <View style={styles.menuIconBox}>
-                    <Ionicons
-                      name="shield-checkmark-outline"
-                      size={18}
-                      color={colors.text}
-                    />
-                  </View>
-                  <AppText variant="body" style={styles.menuRowLabel}>
-                    Privacy Policy
-                  </AppText>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={16}
-                    color={colors.textMuted}
-                  />
-                </PressableScale>
-
-                <View style={styles.menuDivider} />
-
-                {/* Terms and Conditions */}
-                <PressableScale
-                  onPress={() => router.push('/legal/terms')}
-                  scaleTo={0.99}
-                  rippleColor={colors.rippleNeutral}
-                  accessibilityRole="link"
-                  accessibilityLabel="Terms and Conditions"
-                  style={styles.menuRow}
-                >
-                  <View style={styles.menuIconBox}>
-                    <Ionicons
-                      name="document-text-outline"
-                      size={18}
-                      color={colors.text}
-                    />
-                  </View>
-                  <AppText variant="body" style={styles.menuRowLabel}>
-                    Terms and Conditions
-                  </AppText>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={16}
-                    color={colors.textMuted}
-                  />
-                </PressableScale>
-
-                <View style={styles.menuDivider} />
-
-                {/* Support Contact */}
-                <View style={styles.menuRowStatic}>
-                  <View style={styles.menuIconBox}>
-                    <Ionicons
-                      name="mail-outline"
-                      size={18}
-                      color={colors.text}
-                    />
-                  </View>
-                  <View style={styles.menuStaticTextCol}>
-                    <AppText variant="body" style={styles.menuRowLabel}>
-                      Developer Support
-                    </AppText>
-                    <AppText variant="caption" tone="muted">
-                      {CONTACT_EMAIL}
-                    </AppText>
-                  </View>
-                </View>
-
-                <View style={styles.menuDivider} />
-
-                {/* App Version */}
-                <View style={styles.menuRowStatic}>
-                  <View style={styles.menuIconBox}>
-                    <Ionicons
-                      name="information-circle-outline"
-                      size={18}
-                      color={colors.text}
-                    />
-                  </View>
-                  <AppText variant="body" style={styles.menuRowLabel}>
-                    Application Version
-                  </AppText>
-                  <AppText variant="caption" tone="muted" style={styles.versionBadge}>
-                    1.0.0
-                  </AppText>
-                </View>
-              </Card>
-            </View>
-
-            {/* 5. DATA & ACCOUNT ZONE */}
-            <View style={styles.section}>
-              <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
-                DATA MANAGEMENT
-              </AppText>
-
-              <Card style={styles.dangerZoneCard}>
-                <View style={styles.cardHeaderRow}>
-                  <View style={[styles.iconBox, { backgroundColor: colors.dangerBg }]}>
-                    <Ionicons
-                      name="trash-outline"
-                      size={18}
-                      color={colors.danger}
-                    />
-                  </View>
-                  <View style={styles.cardHeaderInfo}>
-                    <AppText variant="label" style={styles.cardHeaderTitle}>
-                      Reset Attendance Records
-                    </AppText>
-                    <AppText variant="caption" tone="muted">
-                      Permanently clears all subjects, timetable slots, and attendance logs. Your account session stays signed in.
-                    </AppText>
-                  </View>
-                </View>
-
-                <Button
-                  title="Reset all attendance data"
-                  variant="danger"
-                  icon="trash-outline"
-                  fullWidth
-                  loading={deletingData}
-                  disabled={actionBusy}
-                  onPress={handleConfirmDeleteAllData}
-                  style={styles.dangerActionBtn}
-                />
-              </Card>
-
-              {/* Sign Out Action */}
-              <Button
-                title="Sign out of account"
-                variant="secondary"
-                icon="log-out-outline"
-                fullWidth
-                loading={signingOut}
-                disabled={actionBusy}
-                onPress={() => {
-                  void handleSignOut();
-                }}
-                style={styles.signOutBtn}
+              <Segmented
+                options={APPEARANCE_OPTIONS}
+                value={mode}
+                onChange={setMode}
               />
             </View>
 
-            {/* Error Message Alert */}
-            {errorMessage && (
+            {/* About */}
+            <View style={styles.section}>
+              <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
+                About
+              </AppText>
+              <Card style={styles.groupedCard}>
+                <ListRow
+                  title="Privacy Policy"
+                  chevron
+                  accessibilityRole="link"
+                  accessibilityLabel="Privacy Policy"
+                  onPress={() => router.push('/legal/privacy')}
+                />
+                <Divider />
+                <ListRow
+                  title="Terms and Conditions"
+                  chevron
+                  accessibilityRole="link"
+                  accessibilityLabel="Terms and Conditions"
+                  onPress={() => router.push('/legal/terms')}
+                />
+                <Divider />
+                <ListRow title="App version" rightText="1.0.0" />
+              </Card>
+            </View>
+
+            {/* Data */}
+            <View style={styles.section}>
+              <AppText variant="caption" tone="muted" style={styles.sectionHeader}>
+                Data
+              </AppText>
+              <Card style={styles.groupedCard}>
+                <ListRow
+                  title="Delete all attendance data"
+                  destructive
+                  disabled={actionBusy}
+                  onPress={handleConfirmDeleteAllData}
+                />
+              </Card>
+            </View>
+
+            {errorMessage ? (
               <View style={styles.errorBanner} accessibilityRole="alert">
                 <Ionicons
                   name="alert-circle-outline"
                   size={18}
-                  color={colors.danger}
+                  color={colors.destructiveText}
                   style={styles.errorIcon}
                 />
                 <AppText variant="caption" tone="danger" style={styles.errorText}>
                   {errorMessage}
                 </AppText>
               </View>
-            )}
-          </View>
-        )}
+            ) : null}
+
+            <Button
+              title="Log out"
+              variant="secondary"
+              fullWidth
+              loading={signingOut}
+              disabled={actionBusy}
+              onPress={() => {
+                void handleSignOut();
+              }}
+            />
+            </View>
+          ) : null}
+        </ContentFade>
       </View>
+
+      <ConfirmModal
+        visible={resetModalVisible}
+        title="Delete all attendance data"
+        message="This action will permanently delete every subject, timetable slot, and attendance record. Your account login remains active."
+        confirmLabel="Delete"
+        destructive
+        loading={deletingData}
+        error={errorMessage}
+        onCancel={() => setResetModalVisible(false)}
+        onConfirm={() => {
+          void handleDeleteAllData();
+        }}
+      />
     </Screen>
   );
 }
 
-const styles = StyleSheet.create({
-  scrollContent: {
-    paddingBottom: spacing.xxl + 40,
-  },
-  container: {
-    paddingTop: spacing.xl,
-    paddingHorizontal: spacing.lg,
-    maxWidth: 680,
-    width: '100%',
-    alignSelf: 'center',
-    gap: spacing.lg,
-  },
-  titleGroup: {
-    gap: 4,
-  },
-  skeletonSection: {
-    gap: spacing.lg,
-  },
-  contentGroup: {
-    gap: spacing.xl,
-  },
-
-  /* Identity Card */
-  identityCard: {
-    padding: spacing.lg,
-  },
-  identityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md + 2,
-  },
-  avatarCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: colors.accentSoft,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitials: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.accent,
-  },
-  identityTextGroup: {
-    flex: 1,
-    gap: 3,
-  },
-  userName: {
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-  },
-  userEmail: {
-    fontSize: 13,
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    alignSelf: 'flex-start',
-    backgroundColor: colors.safeBg,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginTop: 2,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.safe,
-  },
-  statusPillText: {
-    color: colors.safe,
-    fontWeight: '600',
-    fontSize: 11,
-  },
-
-  /* Section Styles */
-  section: {
-    gap: spacing.sm,
-  },
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    paddingHorizontal: spacing.xs,
-  },
-  sectionCard: {
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.md,
-  },
-  iconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardHeaderInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  cardHeaderTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  savingBadge: {
-    alignSelf: 'flex-start',
-  },
-  savingText: {
-    fontSize: 12,
-  },
-  stepperContainer: {
-    paddingTop: spacing.xs,
-  },
-  presetsRow: {
-    gap: spacing.xs + 2,
-    paddingTop: spacing.xs,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  presetsLabel: {
-    fontSize: 12,
-  },
-  presetChips: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: spacing.xs + 2,
-  },
-  presetChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: radius.control,
-    backgroundColor: colors.surfaceMuted,
-  },
-  presetChipActive: {
-    backgroundColor: colors.accent,
-  },
-  presetChipText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: colors.text,
-  },
-  presetChipTextActive: {
-    color: colors.surface,
-    fontWeight: '600',
-  },
-
-  /* Grouped Menu Card */
-  groupedCard: {
-    padding: 0,
-    overflow: 'hidden',
-  },
-  menuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    minHeight: 52,
-  },
-  menuRowStatic: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    minHeight: 52,
-  },
-  menuIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: colors.surfaceMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  menuRowLabel: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  menuStaticTextCol: {
-    flex: 1,
-    gap: 2,
-  },
-  menuDivider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginLeft: spacing.lg + 32 + spacing.md,
-  },
-  versionBadge: {
-    fontVariant: ['tabular-nums'],
-    fontWeight: '500',
-  },
-
-  /* Danger Zone */
-  dangerZoneCard: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    borderWidth: 1,
-    borderColor: '#F8B4B4',
-  },
-  dangerActionBtn: {
-    marginTop: spacing.xs,
-  },
-  signOutBtn: {
-    marginTop: spacing.sm,
-  },
-
-  /* Error Banner */
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.dangerBg,
-    borderRadius: radius.control,
-    padding: spacing.md,
-  },
-  errorIcon: {
-    marginRight: spacing.sm,
-    marginTop: 1,
-  },
-  errorText: {
-    flex: 1,
-  },
-});
+const createStyles = createThemedStyles((colors: ThemeColors) =>
+  StyleSheet.create({
+    scrollContent: {
+      paddingBottom: spacing.xxl + 24,
+    },
+    container: {
+      paddingTop: spacing.xl,
+      maxWidth: 680,
+      width: '100%',
+      alignSelf: 'center',
+      gap: spacing.lg,
+    },
+    contentGroup: {
+      gap: spacing.xl,
+    },
+    section: {
+      gap: spacing.sm,
+    },
+    sectionHeader: {
+      fontFamily: fontFamily.medium,
+      paddingHorizontal: spacing.xs,
+    },
+    groupedCard: {
+      padding: 0,
+      overflow: 'hidden',
+    },
+    targetEditor: {
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.md,
+      paddingTop: spacing.xs,
+      gap: spacing.md,
+    },
+    presetRow: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+    },
+    presetBtn: {
+      flex: 1,
+      minHeight: 44,
+      borderRadius: radius.control,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.muted,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    presetBtnSelected: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    presetBtnPressed: {
+      backgroundColor: colors.secondary,
+    },
+    presetText: {
+      fontFamily: fontFamily.medium,
+      color: colors.foreground,
+    },
+    presetTextSelected: {
+      fontFamily: fontFamily.semibold,
+      color: colors.primaryForeground,
+    },
+    errorBanner: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: colors.destructiveBg,
+      borderRadius: radius.control,
+      padding: spacing.md,
+    },
+    errorIcon: {
+      marginRight: spacing.sm,
+      marginTop: 1,
+    },
+    errorText: {
+      flex: 1,
+    },
+  })
+);
