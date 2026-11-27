@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
+import { type ThemeMode } from '@/theme/tokens';
+
 export const REMINDER_MINUTE_OPTIONS = [5, 10, 15, 30] as const;
 
 export type ReminderMinutes = (typeof REMINDER_MINUTE_OPTIONS)[number];
@@ -14,6 +16,37 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   enabled: false,
   minutesBefore: 10,
 };
+
+const THEME_MODE_STORAGE_KEY = 'bunksmart:theme-mode';
+
+function isThemeMode(value: string | null): value is ThemeMode {
+  return value === 'system' || value === 'light' || value === 'dark';
+}
+
+export async function readThemeMode(): Promise<ThemeMode> {
+  if (typeof window === 'undefined' && Platform.OS === 'web') {
+    return 'system';
+  }
+
+  try {
+    const raw = await AsyncStorage.getItem(THEME_MODE_STORAGE_KEY);
+    return isThemeMode(raw) ? raw : 'system';
+  } catch {
+    return 'system';
+  }
+}
+
+export async function writeThemeMode(mode: ThemeMode): Promise<void> {
+  if (typeof window === 'undefined' && Platform.OS === 'web') {
+    return;
+  }
+
+  try {
+    await AsyncStorage.setItem(THEME_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Ignore storage write errors.
+  }
+}
 
 function getReminderStorageKey(userId: string): string {
   return `bunksmart:reminders:${userId}`;
