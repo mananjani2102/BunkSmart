@@ -4,7 +4,8 @@ import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { colors, spacing } from '@/theme/tokens';
+import { useTheme } from '@/theme/ThemeProvider';
+import { spacing } from '@/theme/tokens';
 
 export interface ErrorStateProps {
   title?: string;
@@ -19,13 +20,15 @@ export function ErrorState({
   onRetry,
   style,
 }: ErrorStateProps) {
+  const { colors } = useTheme();
+
   return (
     <Card style={[styles.card, style]}>
       <View style={styles.content} accessibilityRole="alert">
         <Ionicons
           name="alert-circle-outline"
           size={28}
-          color={colors.danger}
+          color={colors.destructiveText}
           style={styles.icon}
         />
 
@@ -50,7 +53,7 @@ export function ErrorState({
 
 const styles = StyleSheet.create({
   card: {
-    paddingVertical: spacing.xl,
+    paddingVertical: spacing.lg,
   },
   content: {
     alignItems: 'center',

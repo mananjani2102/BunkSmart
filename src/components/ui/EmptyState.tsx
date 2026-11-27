@@ -4,37 +4,42 @@ import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { AppText } from '@/components/ui/AppText';
 import { Button, type IoniconName } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { colors, spacing } from '@/theme/tokens';
+import { useTheme } from '@/theme/ThemeProvider';
+import { spacing } from '@/theme/tokens';
 
 export interface EmptyStateProps {
   title: string;
   message: string;
   actionLabel?: string;
   onAction?: () => void;
-  secondaryActionLabel?: string;
-  onSecondaryAction?: () => void;
   icon?: IoniconName;
   style?: StyleProp<ViewStyle>;
 }
 
+/**
+ * Standard empty state card with one muted outline icon, short title, one
+ * sentence, and at most one primary action.
+ */
 export function EmptyState({
   title,
   message,
   actionLabel,
   onAction,
-  secondaryActionLabel,
-  onSecondaryAction,
   icon,
   style,
 }: EmptyStateProps) {
+  const { colors } = useTheme();
+
   return (
     <Card style={[styles.card, style]}>
       <View style={styles.content}>
         {icon ? (
           <Ionicons
             name={icon}
-            size={28}
-            color={colors.textMuted}
+            size={32}
+            color={colors.mutedForeground}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
             style={styles.icon}
           />
         ) : null}
@@ -52,15 +57,6 @@ export function EmptyState({
             title={actionLabel}
             onPress={onAction}
             style={styles.action}
-          />
-        ) : null}
-
-        {secondaryActionLabel && onSecondaryAction ? (
-          <Button
-            title={secondaryActionLabel}
-            variant="secondary"
-            onPress={onSecondaryAction}
-            style={actionLabel ? styles.secondaryAction : styles.action}
           />
         ) : null}
       </View>
@@ -88,9 +84,5 @@ const styles = StyleSheet.create({
   action: {
     alignSelf: 'center',
     marginTop: spacing.lg,
-  },
-  secondaryAction: {
-    alignSelf: 'center',
-    marginTop: spacing.sm,
   },
 });

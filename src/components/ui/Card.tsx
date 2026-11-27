@@ -1,13 +1,15 @@
 import { type ReactNode } from 'react';
 import {
-  StyleSheet,
+  Platform,
+  Pressable,
   View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 
-import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { useReduceMotion } from '@/lib/motion';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import { radius, shadows, spacing, type ThemeColors } from '@/theme/tokens';
 
 export interface CardProps {
   children: ReactNode;
@@ -17,6 +19,34 @@ export interface CardProps {
   testID?: string;
 }
 
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
+  card: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.card,
+    padding: spacing.lg,
+    ...shadows.none,
+  },
+  pressableCard: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.card,
+    padding: spacing.lg,
+    overflow: 'hidden',
+    ...shadows.none,
+  },
+  pressed: {
+    backgroundColor: colors.muted,
+    opacity: 0.94,
+    transform: [{ scale: 0.99 }],
+  },
+  pressedReducedMotion: {
+    backgroundColor: colors.muted,
+  },
+}));
+
 export function Card({
   children,
   onPress,
@@ -24,6 +54,10 @@ export function Card({
   accessibilityLabel,
   testID,
 }: CardProps) {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+  const reduceMotion = useReduceMotion();
+
   if (!onPress) {
     return (
       <View style={[styles.card, style]} testID={testID}>
@@ -32,44 +66,25 @@ export function Card({
     );
   }
 
+  const webCursor =
+    Platform.OS === 'web' ? ('pointer' as const) : undefined;
+
   return (
-    <PressableScale
+    <Pressable
       onPress={onPress}
-      scaleTo={0.985}
-      rippleColor={colors.rippleNeutral}
+      android_ripple={{ color: colors.rippleNeutral, foreground: true }}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       testID={testID}
-      containerStyle={[styles.pressableWrapper, style]}
       style={({ pressed }) => [
-        styles.pressableContent,
-        pressed && styles.pressed,
+        styles.pressableCard,
+        webCursor && ({ cursor: webCursor } as ViewStyle),
+        pressed &&
+          (reduceMotion ? styles.pressedReducedMotion : styles.pressed),
+        style,
       ]}
     >
       {children}
-    </PressableScale>
+    </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.card,
-    padding: spacing.lg,
-  },
-  pressableWrapper: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.card,
-    overflow: 'hidden',
-  },
-  pressableContent: {
-    padding: spacing.lg,
-  },
-  pressed: {
-    backgroundColor: colors.surfacePressed,
-  },
-});

@@ -1,14 +1,14 @@
 import { type ReactNode } from 'react';
 import {
   ScrollView,
-  StyleSheet,
   View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 
-import { colors, spacing } from '@/theme/tokens';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import { spacing, type ThemeColors } from '@/theme/tokens';
 
 const DEFAULT_EDGES: readonly Edge[] = ['top', 'left', 'right'];
 
@@ -21,6 +21,23 @@ export interface ScreenProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
 }
 
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
+  safeArea: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: spacing.xl,
+  },
+  padded: {
+    paddingHorizontal: spacing.lg,
+  },
+}));
+
 export function Screen({
   children,
   scroll = false,
@@ -29,6 +46,9 @@ export function Screen({
   style,
   contentContainerStyle,
 }: ScreenProps) {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+
   return (
     <SafeAreaView edges={edges} style={[styles.safeArea, style]}>
       {scroll ? (
@@ -56,20 +76,3 @@ export function Screen({
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  content: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: spacing.xl,
-  },
-  padded: {
-    paddingHorizontal: spacing.lg,
-  },
-});
