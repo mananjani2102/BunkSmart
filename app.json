@@ -6,44 +6,66 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "bunksmart",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/icon.png"
     },
     "android": {
+      "icon": "./assets/images/icon.png",
       "package": "com.bunksmart.attendance",
       "versionCode": 2,
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#0B6E66",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/images/adaptive-foreground.png",
+        "monochromeImage": "./assets/images/adaptive-foreground.png"
       },
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/icon.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#085F53",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 180
+          "backgroundColor": "#FCFCFC",
+          "image": "./assets/images/splash-light.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#000000",
+            "image": "./assets/images/adaptive-foreground.png"
+          }
         }
       ],
       [
         "expo-notifications",
         {
-          "color": "#0B6E66"
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#2D62EF"
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow BunkSmart to choose a photo from your library for your profile picture.",
+          "cameraPermission": false,
+          "microphonePermission": false,
+          "colors": {
+            "cropToolbarColor": "#FFFFFF",
+            "cropToolbarIconColor": "#16181A",
+            "cropToolbarActionTextColor": "#16181A",
+            "cropBackButtonIconColor": "#16181A",
+            "cropBackgroundColor": "#F5F4F0"
+          }
+        }
+      ],
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": false,
