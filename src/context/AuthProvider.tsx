@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -41,11 +42,14 @@ export interface ProfilePatch {
   baseline_date?: string | null;
 }
 
-export interface AuthContextValue {
+export interface AuthStateValue {
   session: Session | null;
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+}
+
+export interface AuthActionsValue {
   signIn: (email: string, password: string) => Promise<SignInResult>;
   signUp: (
     fullName: string,
@@ -57,7 +61,8 @@ export interface AuthContextValue {
   refreshProfile: () => Promise<Profile | null>;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+const AuthStateContext = createContext<AuthStateValue | null>(null);
+const AuthActionsContext = createContext<AuthActionsValue | null>(null);
 
 function getMetadataFullName(user: User | null): string {
   const raw = user?.user_metadata?.full_name;
@@ -98,6 +103,17 @@ async function fetchOrCreateProfile(
   );
 }
 
+const SESSION_INIT_TIMEOUT_MS = 8000;
+
+class SessionTimeoutError extends Error {
+  constructor() {
+    super('Session initialization timed out.');
+  }
+}
+
+/**
+ * Provides split auth state and stable auth action contexts.
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -107,12 +123,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const userId = user?.id ?? null;
   const metadataFullName = getMetadataFullName(user);
 
+  const userIdRef = useRef<string | null>(userId);
+  const metadataFullNameRef = useRef<string>(metadataFullName);
+
+  useEffect(() => {
+    userIdRef.current = userId;
+    metadataFullNameRef.current = metadataFullName;
+  }, [userId, metadataFullName]);
+
   useEffect(() => {
     let cancelled = false;
 
     const initializeSession = async () => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
-        const { data, error } = await supabase.auth.getSession();
+        const sessionPromise = supabase.auth.getSession();
+        void sessionPromise.catch(() => undefined);
+
+        const { data, error } = await Promise.race([
+          sessionPromise,
+          new Promise<never>((_resolve, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(new SessionTimeoutError());
+            }, SESSION_INIT_TIMEOUT_MS);
+          }),
+        ]);
         if (error) {
           await supabase.auth.signOut({ scope: 'local' });
           if (!cancelled) {
@@ -122,17 +157,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else if (!cancelled) {
           setSession(data.session ?? null);
         }
-      } catch {
-        try {
-          await supabase.auth.signOut({ scope: 'local' });
-        } catch {
-          // Ignore secondary cleanup error when clearing invalid local session.
+      } catch (err) {
+        if (!(err instanceof SessionTimeoutError)) {
+          try {
+            await supabase.auth.signOut({ scope: 'local' });
+          } catch {
+            // Best-effort clear of corrupted session.
+          }
         }
         if (!cancelled) {
           setSession(null);
           setProfile(null);
         }
       } finally {
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId);
+        }
         if (!cancelled) {
           setLoading(false);
         }
@@ -144,8 +184,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      if (!nextSession) {
+      if (cancelled) {
+        return;
+      }
+      setSession(nextSession ?? null);
+      if (!nextSession?.user) {
         setProfile(null);
       }
     });
@@ -248,14 +291,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async (): Promise<void> => {
     try {
-      await cancelAllClassReminders();
-    } catch {
-      // Continue signing out even if local reminder cleanup fails.
-    }
+      const [, authResult] = await Promise.allSettled([
+        cancelAllClassReminders(),
+        supabase.auth.signOut(),
+      ]);
 
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
+      if (
+        authResult.status === 'rejected' ||
+        (authResult.status === 'fulfilled' && authResult.value.error)
+      ) {
         await supabase.auth.signOut({ scope: 'local' });
       }
     } catch {
@@ -272,7 +316,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateProfile = useCallback(
     async (patch: ProfilePatch): Promise<Profile> => {
-      if (!userId) {
+      const currentUserId = userIdRef.current;
+      if (!currentUserId) {
         throw new AppError('Log in to update your profile.');
       }
 
@@ -297,64 +342,91 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await supabase
           .from('profiles')
           .update(payload)
-          .eq('id', userId)
+          .eq('id', currentUserId)
           .select(PROFILE_COLUMNS)
           .single<Profile>()
       );
 
-      setProfile(updated);
-      void AsyncStorage.setItem(`bunksmart:profile:${userId}`, JSON.stringify(updated));
+      if (userIdRef.current === currentUserId) {
+        setProfile(updated);
+        void AsyncStorage.setItem(
+          `bunksmart:profile:${currentUserId}`,
+          JSON.stringify(updated)
+        );
+      }
       return updated;
     },
-    [userId]
+    []
   );
 
   const refreshProfile = useCallback(async (): Promise<Profile | null> => {
-    if (!userId) {
+    const currentUserId = userIdRef.current;
+    if (!currentUserId) {
       setProfile(null);
       return null;
     }
 
-    const loaded = await fetchOrCreateProfile(userId, metadataFullName);
-    setProfile(loaded);
+    const loaded = await fetchOrCreateProfile(
+      currentUserId,
+      metadataFullNameRef.current
+    );
+    if (userIdRef.current === currentUserId) {
+      setProfile(loaded);
+    }
     return loaded;
-  }, [userId, metadataFullName]);
+  }, []);
 
   const activeProfile =
     userId && profile && profile.id === userId ? profile : null;
 
-  const value = useMemo<AuthContextValue>(
+  const stateValue = useMemo<AuthStateValue>(
     () => ({
       session,
       user,
       profile: activeProfile,
       loading,
+    }),
+    [session, user, activeProfile, loading]
+  );
+
+  const actionsValue = useMemo<AuthActionsValue>(
+    () => ({
       signIn,
       signUp,
       signOut,
       updateProfile,
       refreshProfile,
     }),
-    [
-      session,
-      user,
-      activeProfile,
-      loading,
-      signIn,
-      signUp,
-      signOut,
-      updateProfile,
-      refreshProfile,
-    ]
+    [signIn, signUp, signOut, updateProfile, refreshProfile]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthActionsContext.Provider value={actionsValue}>
+      <AuthStateContext.Provider value={stateValue}>
+        {children}
+      </AuthStateContext.Provider>
+    </AuthActionsContext.Provider>
+  );
 }
 
-export function useAuth(): AuthContextValue {
-  const context = useContext(AuthContext);
+/**
+ * Returns the reactive authentication and profile state.
+ */
+export function useAuthState(): AuthStateValue {
+  const context = useContext(AuthStateContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider.');
+    throw new Error('useAuthState must be used within an AuthProvider.');
+  }
+  return context;
+}
+
+/**
+ * Returns stable authentication action functions whose identities never change.
+ */
+export function useAuthActions(): AuthActionsValue {
+  const context = useContext(AuthActionsContext);
+  if (!context) {
+    throw new Error('useAuthActions must be used within an AuthProvider.');
   }
   return context;
 }

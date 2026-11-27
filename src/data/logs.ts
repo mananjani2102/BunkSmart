@@ -81,6 +81,52 @@ export async function setDateLogsStatusBatch(
   return unwrapData(result);
 }
 
+export interface ManualLogInput {
+  subject_id: string;
+  log_date: string;
+  status: AttendanceStatus;
+}
+
+export async function insertManualLogsBatch(
+  inputs: readonly ManualLogInput[]
+): Promise<AttendanceLog[]> {
+  if (inputs.length === 0) {
+    return [];
+  }
+
+  const payload = inputs.map((input) => ({
+    subject_id: input.subject_id,
+    slot_id: null,
+    log_date: input.log_date,
+    status: input.status,
+  }));
+
+  const result = await supabase
+    .from('attendance_logs')
+    .insert(payload)
+    .select(LOG_COLUMNS)
+    .overrideTypes<AttendanceLog[], { merge: false }>();
+
+  return unwrapData(result);
+}
+
+export async function deleteLogsForSlotsOnDate(
+  logDate: string,
+  slotIds: readonly string[]
+): Promise<void> {
+  if (slotIds.length === 0) {
+    return;
+  }
+
+  const result = await supabase
+    .from('attendance_logs')
+    .delete()
+    .eq('log_date', logDate)
+    .in('slot_id', [...slotIds]);
+
+  assertNoError(result);
+}
+
 export async function deleteLogsForDate(logDate: string): Promise<void> {
   const result = await supabase
     .from('attendance_logs')

@@ -1,19 +1,10 @@
-import { isRunningInExpoGo } from 'expo';
+import { PermissionStatus, isRunningInExpoGo } from 'expo';
+import { AndroidImportance } from 'expo-notifications/build/NotificationChannelManager.types';
 import {
-  AndroidImportance,
   IosAuthorizationStatus,
-  PermissionStatus,
-  SchedulableTriggerInputTypes,
-  cancelAllScheduledNotificationsAsync,
-  getExactAlarmPermissionsAsync,
-  getPermissionsAsync,
-  requestExactAlarmPermissionsAsync,
-  requestPermissionsAsync,
-  scheduleNotificationAsync,
-  setNotificationChannelAsync,
-  setNotificationHandler,
   type NotificationPermissionsStatus,
-} from 'expo-notifications';
+} from 'expo-notifications/build/NotificationPermissions.types';
+import { SchedulableTriggerInputTypes } from 'expo-notifications/build/Notifications.types';
 import { Platform } from 'react-native';
 
 import {
@@ -21,6 +12,7 @@ import {
   isoWeekdayToNotificationWeekday,
   timeStringToMinutes,
 } from '@/lib/dates';
+import { AppError } from '@/lib/errors';
 import { type ReminderMinutes } from '@/lib/prefs';
 import { type Subject, type TimetableSlot } from '@/types/db';
 
@@ -35,24 +27,96 @@ export interface ExactAlarmPermissionState {
   canAskAgain: boolean;
 }
 
-if (Platform.OS !== 'web') {
-  setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: false,
-      shouldSetBadge: false,
-    }),
-  });
+interface LocalNotificationsApi {
+  getPermissionsAsync: typeof import('expo-notifications/build/NotificationPermissions').getPermissionsAsync;
+  requestPermissionsAsync: typeof import('expo-notifications/build/NotificationPermissions').requestPermissionsAsync;
+  getExactAlarmPermissionsAsync: typeof import('expo-notifications/build/NotificationPermissions').getExactAlarmPermissionsAsync;
+  requestExactAlarmPermissionsAsync: typeof import('expo-notifications/build/NotificationPermissions').requestExactAlarmPermissionsAsync;
+  setNotificationChannelAsync: typeof import('expo-notifications/build/setNotificationChannelAsync').setNotificationChannelAsync;
+  scheduleNotificationAsync: typeof import('expo-notifications/build/scheduleNotificationAsync').scheduleNotificationAsync;
+  cancelAllScheduledNotificationsAsync: typeof import('expo-notifications/build/cancelAllScheduledNotificationsAsync').cancelAllScheduledNotificationsAsync;
 }
 
-async function ensureAndroidChannel(): Promise<void> {
+let cachedApi: LocalNotificationsApi | null = null;
+let loadingApiPromise: Promise<LocalNotificationsApi | null> | null = null;
+let handlerConfigured = false;
+
+/**
+ * Loads only the local-notification submodules from `expo-notifications` so
+ * `getExpoPushTokenAsync` (and its native `ExpoApplication` dependency) is
+ * never imported or evaluated in Expo Go.
+ */
+async function loadLocalNotifications(): Promise<LocalNotificationsApi | null> {
+  if (Platform.OS === 'web') {
+    return null;
+  }
+
+  if (cachedApi) {
+    return cachedApi;
+  }
+
+  if (!loadingApiPromise) {
+    loadingApiPromise = (async () => {
+      try {
+        const [
+          handlerMod,
+          permissionsMod,
+          channelMod,
+          scheduleMod,
+          cancelMod,
+        ] = await Promise.all([
+          import('expo-notifications/build/NotificationsHandler'),
+          import('expo-notifications/build/NotificationPermissions'),
+          import('expo-notifications/build/setNotificationChannelAsync'),
+          import('expo-notifications/build/scheduleNotificationAsync'),
+          import(
+            'expo-notifications/build/cancelAllScheduledNotificationsAsync'
+          ),
+        ]);
+
+        if (!handlerConfigured) {
+          handlerMod.setNotificationHandler({
+            handleNotification: async () => ({
+              shouldShowBanner: true,
+              shouldShowList: true,
+              shouldPlaySound: false,
+              shouldSetBadge: false,
+            }),
+          });
+          handlerConfigured = true;
+        }
+
+        cachedApi = {
+          getPermissionsAsync: permissionsMod.getPermissionsAsync,
+          requestPermissionsAsync: permissionsMod.requestPermissionsAsync,
+          getExactAlarmPermissionsAsync:
+            permissionsMod.getExactAlarmPermissionsAsync,
+          requestExactAlarmPermissionsAsync:
+            permissionsMod.requestExactAlarmPermissionsAsync,
+          setNotificationChannelAsync: channelMod.setNotificationChannelAsync,
+          scheduleNotificationAsync: scheduleMod.scheduleNotificationAsync,
+          cancelAllScheduledNotificationsAsync:
+            cancelMod.cancelAllScheduledNotificationsAsync,
+        };
+
+        return cachedApi;
+      } catch {
+        loadingApiPromise = null;
+        return null;
+      }
+    })();
+  }
+
+  return loadingApiPromise;
+}
+
+async function ensureAndroidChannel(api: LocalNotificationsApi): Promise<void> {
   if (Platform.OS !== 'android') {
     return;
   }
 
   try {
-    await setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
+    await api.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
       name: REMINDER_CHANNEL_NAME,
       importance: AndroidImportance.HIGH,
     });
@@ -93,7 +157,12 @@ export async function hasReminderPermission(): Promise<boolean> {
     return false;
   }
 
-  const settings = await getPermissionsAsync();
+  const api = await loadLocalNotifications();
+  if (!api) {
+    return false;
+  }
+
+  const settings = await api.getPermissionsAsync();
   return isPermissionGranted(settings);
 }
 
@@ -102,9 +171,17 @@ export async function requestReminderPermission(): Promise<ReminderPermissionRes
     return 'denied';
   }
 
-  await ensureAndroidChannel();
+  const api = await loadLocalNotifications();
+  if (!api) {
+    throw new AppError(
+      'Class reminders are unavailable in this Expo Go build. Use an Android APK build to enable reminders.'
+    );
+  }
 
-  const existing = await getPermissionsAsync();
+  const [, existing] = await Promise.all([
+    ensureAndroidChannel(api),
+    api.getPermissionsAsync(),
+  ]);
   if (isPermissionGranted(existing)) {
     return 'granted';
   }
@@ -113,7 +190,7 @@ export async function requestReminderPermission(): Promise<ReminderPermissionRes
     return 'denied';
   }
 
-  const requested = await requestPermissionsAsync();
+  const requested = await api.requestPermissionsAsync();
   return isPermissionGranted(requested) ? 'granted' : 'denied';
 }
 
@@ -122,8 +199,13 @@ export async function getExactAlarmPermissionState(): Promise<ExactAlarmPermissi
     return { granted: true, canAskAgain: true };
   }
 
+  const api = await loadLocalNotifications();
+  if (!api) {
+    return { granted: true, canAskAgain: false };
+  }
+
   try {
-    const response = await getExactAlarmPermissionsAsync();
+    const response = await api.getExactAlarmPermissionsAsync();
     return {
       granted: Boolean(response.granted),
       canAskAgain: Boolean(response.canAskAgain),
@@ -138,13 +220,18 @@ export async function requestExactAlarmPermission(): Promise<ExactAlarmPermissio
     return { granted: true, canAskAgain: true };
   }
 
+  const api = await loadLocalNotifications();
+  if (!api) {
+    return { granted: true, canAskAgain: false };
+  }
+
   const existing = await getExactAlarmPermissionState();
   if (existing.granted || !existing.canAskAgain) {
     return existing;
   }
 
   try {
-    const requested = await requestExactAlarmPermissionsAsync();
+    const requested = await api.requestExactAlarmPermissionsAsync();
     return {
       granted: Boolean(requested.granted),
       canAskAgain: Boolean(requested.canAskAgain),
@@ -167,8 +254,13 @@ export async function cancelAllClassReminders(): Promise<void> {
     return;
   }
 
+  const api = await loadLocalNotifications();
+  if (!api) {
+    return;
+  }
+
   await runSerialized(async () => {
-    await cancelAllScheduledNotificationsAsync();
+    await api.cancelAllScheduledNotificationsAsync();
   });
 }
 
@@ -181,14 +273,23 @@ export async function rescheduleClassReminders(
     return;
   }
 
+  const api = await loadLocalNotifications();
+  if (!api) {
+    return;
+  }
+
   await runSerialized(async () => {
-    await ensureAndroidChannel();
-    await cancelAllScheduledNotificationsAsync();
+    await Promise.all([
+      ensureAndroidChannel(api),
+      api.cancelAllScheduledNotificationsAsync(),
+    ]);
 
     const subjectById: Record<string, Subject> = {};
     for (const subject of subjects) {
       subjectById[subject.id] = subject;
     }
+
+    const scheduleTasks: Promise<string>[] = [];
 
     for (const slot of slots) {
       const subject = subjectById[slot.subject_id];
@@ -210,21 +311,27 @@ export async function rescheduleClassReminders(
       const weekday = isoWeekdayToNotificationWeekday(isoWeekday);
       const startLabel = formatTime12Hour(slot.start_time);
 
-      await scheduleNotificationAsync({
-        content: {
-          title: `${subject.name} at ${startLabel}`,
-          body: `Starts in ${minutesBefore} minutes.`,
-          sound: false,
-        },
-        trigger: {
-          type: SchedulableTriggerInputTypes.WEEKLY,
-          channelId: REMINDER_CHANNEL_ID,
-          weekday,
-          hour,
-          minute,
-          delivery: 'bestEffort',
-        },
-      });
+      scheduleTasks.push(
+        api.scheduleNotificationAsync({
+          content: {
+            title: `${subject.name} at ${startLabel}`,
+            body: `Starts in ${minutesBefore} minutes.`,
+            sound: false,
+          },
+          trigger: {
+            type: SchedulableTriggerInputTypes.WEEKLY,
+            channelId: REMINDER_CHANNEL_ID,
+            weekday,
+            hour,
+            minute,
+            delivery: 'bestEffort',
+          },
+        })
+      );
+    }
+
+    if (scheduleTasks.length > 0) {
+      await Promise.all(scheduleTasks);
     }
   });
 }

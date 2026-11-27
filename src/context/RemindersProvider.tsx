@@ -8,10 +8,10 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
-import { useAuth } from '@/context/AuthProvider';
-import { useData } from '@/context/DataProvider';
+import { useAuthState } from '@/context/AuthProvider';
+import { useDataState } from '@/context/DataProvider';
 import { getFriendlyErrorMessage } from '@/lib/errors';
 import {
   DEFAULT_REMINDER_SETTINGS,
@@ -37,16 +37,16 @@ export interface RemindersContextValue {
   exactAlarmGranted: boolean;
   exactAlarmCanAsk: boolean;
   error: string | null;
-  setEnabled: (enabled: boolean) => Promise<void>;
-  setMinutesBefore: (minutesBefore: ReminderMinutes) => Promise<void>;
+  setEnabled: (enabled: boolean) => Promise<boolean>;
+  setMinutesBefore: (minutesBefore: ReminderMinutes) => Promise<boolean>;
   allowExactAlarms: () => Promise<void>;
 }
 
 const RemindersContext = createContext<RemindersContextValue | null>(null);
 
 export function RemindersProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
-  const { status, subjects, slots } = useData();
+  const { user } = useAuthState();
+  const { status, subjects, slots } = useDataState();
   const userId = user?.id ?? null;
 
   const [prevUserId, setPrevUserId] = useState<string | null>(userId);
@@ -133,7 +133,6 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
         await rescheduleClassReminders(slots, subjects, settings.minutesBefore);
       } catch (err) {
         if (!cancelled && mountedRef.current) {
-          console.error('Reschedule class reminders failed:', err);
           setError(getFriendlyErrorMessage(err));
         }
       }
@@ -188,9 +187,9 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
   }, [permissionDenied, settings.enabled, exactAlarmGranted]);
 
   const setEnabled = useCallback(
-    async (nextEnabled: boolean): Promise<void> => {
-      if (!userId || busyRef.current) {
-        return;
+    async (nextEnabled: boolean): Promise<boolean> => {
+      if (Platform.OS === 'web' || !userId || busyRef.current) {
+        return false;
       }
 
       busyRef.current = true;
@@ -203,7 +202,7 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
         if (nextEnabled) {
           const permission = await requestReminderPermission();
           if (!mountedRef.current) {
-            return;
+            return false;
           }
 
           if (permission === 'denied') {
@@ -216,12 +215,12 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
               setSettings(disabledSettings);
               setPermissionDenied(true);
             }
-            return;
+            return false;
           }
 
           const exactState = await requestExactAlarmPermission();
           if (!mountedRef.current) {
-            return;
+            return false;
           }
 
           const enabledSettings: ReminderSettings = {
@@ -235,23 +234,27 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
             setExactAlarmCanAsk(exactState.canAskAgain);
             setSettings(enabledSettings);
           }
+          return true;
         } else {
-          await cancelAllClassReminders();
           const disabledSettings: ReminderSettings = {
             enabled: false,
             minutesBefore: current.minutesBefore,
           };
-          await writeReminderSettings(userId, disabledSettings);
+          await Promise.all([
+            cancelAllClassReminders(),
+            writeReminderSettings(userId, disabledSettings),
+          ]);
           if (mountedRef.current) {
             setPermissionDenied(false);
             setSettings(disabledSettings);
           }
+          return true;
         }
       } catch (err) {
-        console.error('Update reminder toggle failed:', err);
         if (mountedRef.current) {
           setError(getFriendlyErrorMessage(err));
         }
+        return false;
       } finally {
         busyRef.current = false;
         if (mountedRef.current) {
@@ -263,13 +266,13 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
   );
 
   const setMinutesBefore = useCallback(
-    async (minutesBefore: ReminderMinutes): Promise<void> => {
+    async (minutesBefore: ReminderMinutes): Promise<boolean> => {
       if (
         !userId ||
         busyRef.current ||
         settingsRef.current.minutesBefore === minutesBefore
       ) {
-        return;
+        return false;
       }
 
       busyRef.current = true;
@@ -285,11 +288,12 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
         if (mountedRef.current) {
           setSettings(nextSettings);
         }
+        return true;
       } catch (err) {
-        console.error('Update reminder minutes failed:', err);
         if (mountedRef.current) {
           setError(getFriendlyErrorMessage(err));
         }
+        return false;
       } finally {
         busyRef.current = false;
         if (mountedRef.current) {
@@ -316,7 +320,6 @@ export function RemindersProvider({ children }: { children: ReactNode }) {
         setExactAlarmCanAsk(exactState.canAskAgain);
       }
     } catch (err) {
-      console.error('Request exact alarm permission failed:', err);
       if (mountedRef.current) {
         setError(getFriendlyErrorMessage(err));
       }
