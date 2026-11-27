@@ -1,13 +1,13 @@
 import { useEffect } from 'react';
 import {
-  StyleSheet,
   View,
   type DimensionValue,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 
-import { colors, radius } from '@/theme/tokens';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import { radius, type ThemeColors } from '@/theme/tokens';
 
 export interface SkeletonProps {
   width?: DimensionValue;
@@ -17,6 +17,12 @@ export interface SkeletonProps {
 }
 
 const STYLE_ID = 'bunksmart-skeleton-web-style';
+
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
+  base: {
+    backgroundColor: colors.secondary,
+  },
+}));
 
 function ensureWebStyles() {
   if (typeof document === 'undefined') {
@@ -36,6 +42,12 @@ function ensureWebStyles() {
         will-change: opacity;
         pointer-events: none;
       }
+      @media (prefers-reduced-motion: reduce) {
+        .bunksmart-skeleton {
+          animation: none !important;
+          opacity: 0.7;
+        }
+      }
     `;
     document.head.appendChild(styleEl);
   }
@@ -47,6 +59,9 @@ export function Skeleton({
   borderRadius = radius.small,
   style,
 }: SkeletonProps) {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+
   useEffect(() => {
     ensureWebStyles();
   }, []);
@@ -69,9 +84,3 @@ export function Skeleton({
     />
   );
 }
-
-const styles = StyleSheet.create({
-  base: {
-    backgroundColor: colors.surfaceMuted,
-  },
-});
