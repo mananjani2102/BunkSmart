@@ -1,4 +1,4 @@
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { Segmented, type SegmentedOption } from '@/components/ui/Segmented';
@@ -8,7 +8,8 @@ import {
   minutesToTimeString,
   timeStringToMinutes,
 } from '@/lib/dates';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import { radius, spacing, type ThemeColors } from '@/theme/tokens';
 
 type Meridiem = 'AM' | 'PM';
 
@@ -26,6 +27,29 @@ export interface TimeFieldProps {
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
 }
+
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
+  container: {
+    width: '100%',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xs,
+  },
+  preview: {
+    fontVariant: ['tabular-nums'],
+  },
+  box: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.control,
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+}));
 
 function parseTimeParts(timeStr: string): {
   hour12: number;
@@ -72,6 +96,9 @@ export function TimeField({
   disabled = false,
   style,
 }: TimeFieldProps) {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+
   const { hour12, minute, period, safeTime } = parseTimeParts(value);
   const formatted = formatTime12Hour(safeTime);
 
@@ -128,26 +155,3 @@ export function TimeField({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    width: '100%',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.xs,
-  },
-  preview: {
-    fontVariant: ['tabular-nums'],
-  },
-  box: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.control,
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-});

@@ -2,14 +2,12 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
-  Platform,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 
+import { USE_NATIVE_DRIVER, useReduceMotion } from '@/lib/motion';
 import { motion } from '@/theme/tokens';
-
-const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 export interface FadeViewProps {
   children: ReactNode;
@@ -21,12 +19,19 @@ export function FadeView({ children, transitionKey, style }: FadeViewProps) {
   const [opacity] = useState(() => new Animated.Value(1));
   const [translateY] = useState(() => new Animated.Value(0));
   const prevKeyRef = useRef(transitionKey);
+  const reduceMotion = useReduceMotion();
 
   useEffect(() => {
     if (prevKeyRef.current === transitionKey) {
       return;
     }
     prevKeyRef.current = transitionKey;
+
+    if (reduceMotion) {
+      opacity.setValue(1);
+      translateY.setValue(0);
+      return;
+    }
 
     opacity.setValue(0.35);
     translateY.setValue(4);
@@ -51,7 +56,7 @@ export function FadeView({ children, transitionKey, style }: FadeViewProps) {
     return () => {
       anim.stop();
     };
-  }, [opacity, transitionKey, translateY]);
+  }, [opacity, reduceMotion, transitionKey, translateY]);
 
   return (
     <Animated.View

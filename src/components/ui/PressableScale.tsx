@@ -10,9 +10,9 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { colors, motion } from '@/theme/tokens';
-
-const USE_NATIVE_DRIVER = Platform.OS !== 'web';
+import { USE_NATIVE_DRIVER, useReduceMotion } from '@/lib/motion';
+import { useTheme } from '@/theme/ThemeProvider';
+import { motion } from '@/theme/tokens';
 
 export interface PressableScaleProps extends Omit<PressableProps, 'children'> {
   children: ReactNode;
@@ -24,7 +24,7 @@ export interface PressableScaleProps extends Omit<PressableProps, 'children'> {
 export function PressableScale({
   children,
   scaleTo = 0.975,
-  rippleColor = colors.rippleNeutral,
+  rippleColor,
   containerStyle,
   disabled,
   onPressIn,
@@ -32,9 +32,17 @@ export function PressableScale({
   style,
   ...rest
 }: PressableScaleProps) {
+  const { colors } = useTheme();
   const [scale] = useState(() => new Animated.Value(1));
+  const reduceMotion = useReduceMotion();
+  const resolvedRipple =
+    rippleColor === undefined ? colors.rippleNeutral : rippleColor;
 
   const animateTo = (toValue: number, duration: number) => {
+    if (reduceMotion) {
+      scale.setValue(1);
+      return;
+    }
     Animated.timing(scale, {
       toValue,
       duration,
@@ -70,8 +78,8 @@ export function PressableScale({
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         android_ripple={
-          rippleColor && !disabled
-            ? { color: rippleColor, foreground: true }
+          resolvedRipple && !disabled
+            ? { color: resolvedRipple, foreground: true }
             : undefined
         }
         style={(state) => [
