@@ -4,16 +4,22 @@ import { StyleSheet, View } from 'react-native';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Screen } from '@/components/ui/Screen';
-import { useAuth } from '@/context/AuthProvider';
+import { useAuthState } from '@/context/AuthProvider';
+import { useReduceMotion } from '@/lib/motion';
+import { useTheme } from '@/theme/ThemeProvider';
+import { getSharedHeaderOptions } from '@/theme/navigation';
 import { spacing } from '@/theme/tokens';
 
 export default function NotFoundScreen() {
-  const { session } = useAuth();
+  const { session } = useAuthState();
+  const { colors } = useTheme();
+  const reduceMotion = useReduceMotion();
   const homeHref = session ? '/' : '/(auth)/login';
+  const sharedHeaderOptions = getSharedHeaderOptions(colors, reduceMotion);
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Page Not Found', headerShown: true }} />
+      <Stack.Screen options={{ ...sharedHeaderOptions, title: 'Page Not Found' }} />
       <Screen contentContainerStyle={styles.container}>
         <View style={styles.card}>
           <AppText variant="title" style={styles.title}>

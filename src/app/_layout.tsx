@@ -1,28 +1,49 @@
+import { useFonts } from 'expo-font';
 import { Stack, type ErrorBoundaryProps } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef } from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { Card } from '@/components/ui/Card';
+import GeistMedium from '@/assets/fonts/Geist-Medium.ttf';
+import GeistRegular from '@/assets/fonts/Geist-Regular.ttf';
+import GeistSemiBold from '@/assets/fonts/Geist-SemiBold.ttf';
+import { OverviewSkeleton } from '@/components/SkeletonLayouts';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Screen } from '@/components/ui/Screen';
-import { Skeleton } from '@/components/ui/Skeleton';
-import { AuthProvider, useAuth } from '@/context/AuthProvider';
+import { AuthProvider, useAuthState } from '@/context/AuthProvider';
 import { DataProvider } from '@/context/DataProvider';
 import { RemindersProvider } from '@/context/RemindersProvider';
-import { modalHeaderOptions, sharedHeaderOptions } from '@/theme/navigation';
-import { spacing } from '@/theme/tokens';
+import { SnackbarProvider } from '@/context/SnackbarProvider';
+import { useDelayedVisible, useReduceMotion } from '@/lib/motion';
+import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
+import {
+  getFadeScreenOptions,
+  getModalHeaderOptions,
+  getSharedHeaderOptions,
+} from '@/theme/navigation';
+import { fontFamily, spacing } from '@/theme/tokens';
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 const ERROR_BOUNDARY_EDGES = ['top', 'bottom', 'left', 'right'] as const;
+const SPLASH_FALLBACK_TIMEOUT_MS = 4000;
 
-export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
+function hideSplashScreen() {
+  void SplashScreen.hideAsync().catch(() => undefined);
+}
+
+function ErrorBoundaryBody({ retry }: ErrorBoundaryProps) {
+  const { scheme } = useTheme();
+
+  useEffect(() => {
+    hideSplashScreen();
+  }, []);
+
   return (
-    <SafeAreaProvider>
-      <StatusBar style="dark" />
+    <>
+      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <Screen
         edges={ERROR_BOUNDARY_EDGES}
         contentContainerStyle={styles.errorContainer}
@@ -35,135 +56,182 @@ export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
           }}
         />
       </Screen>
+    </>
+  );
+}
+
+export function ErrorBoundary(props: ErrorBoundaryProps) {
+  return (
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <ErrorBoundaryBody {...props} />
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }
 
-function RootNavigator() {
-  const { session, loading } = useAuth();
+function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
+  const { session, loading: authLoading } = useAuthState();
+  const { colors, scheme, themeLoaded } = useTheme();
+  const reduceMotion = useReduceMotion();
+  const showBootSkeleton = useDelayedVisible(
+    themeLoaded && fontsReady && authLoading
+  );
+  const appReady = themeLoaded && fontsReady && !authLoading;
+  const splashHiddenRef = useRef(false);
+
+  const triggerHideSplash = useCallback(() => {
+    if (splashHiddenRef.current) {
+      return;
+    }
+    splashHiddenRef.current = true;
+    hideSplashScreen();
+  }, []);
 
   useEffect(() => {
-    if (!loading) {
-      void SplashScreen.hideAsync().catch(() => undefined);
+    if (!appReady || Platform.OS !== 'web') {
+      return;
     }
-  }, [loading]);
+    const frameId = requestAnimationFrame(triggerHideSplash);
+    return () => {
+      cancelAnimationFrame(frameId);
+    };
+  }, [appReady, triggerHideSplash]);
 
-  if (loading) {
+  if (!themeLoaded || !fontsReady) {
+    return (
+      <View
+        style={[
+          styles.bootBackdrop,
+          { backgroundColor: colors.background },
+        ]}
+      />
+    );
+  }
+
+  if (authLoading) {
     return (
       <Screen padded={false} contentContainerStyle={styles.loadingContainer}>
         <View style={styles.loadingContent}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <View style={{ gap: 4 }}>
-              <Skeleton width={110} height={14} />
-              <Skeleton width={180} height={26} />
-            </View>
-            <Skeleton width={38} height={38} borderRadius={19} />
-          </View>
-          <Card style={styles.loadingCard}>
-            <View style={styles.loadingRow}>
-              <Skeleton width={112} height={112} borderRadius={56} />
-              <View style={styles.loadingColumn}>
-                <Skeleton width="60%" height={20} />
-                <Skeleton width="85%" height={16} />
-                <Skeleton width="100%" height={36} borderRadius={8} />
-              </View>
-            </View>
-            <Skeleton width="100%" height={8} borderRadius={4} style={{ marginTop: 14 }} />
-          </Card>
-          <Card style={styles.loadingCard}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Skeleton width={38} height={38} borderRadius={19} />
-              <View style={{ flex: 1, gap: 6 }}>
-                <Skeleton width="50%" height={18} />
-                <Skeleton width="75%" height={14} />
-              </View>
-            </View>
-          </Card>
-          {[1, 2].map((key) => (
-            <Card key={`boot-skel-${key}`} style={styles.loadingCard}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <Skeleton width={44} height={44} borderRadius={22} />
-                <View style={{ flex: 1, gap: 6 }}>
-                  <Skeleton width="60%" height={18} />
-                  <Skeleton width="40%" height={14} />
-                </View>
-                <Skeleton width={60} height={24} borderRadius={8} />
-              </View>
-            </Card>
-          ))}
+          {showBootSkeleton ? <OverviewSkeleton delayed={false} /> : null}
         </View>
       </Screen>
     );
   }
 
+  const sharedHeaderOptions = getSharedHeaderOptions(colors, reduceMotion);
+  const modalHeaderOptions = getModalHeaderOptions(colors, reduceMotion);
+  const fadeScreenOptions = getFadeScreenOptions(colors, reduceMotion);
+
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Protected guard={Boolean(session)} redirectTo="/(auth)/login">
-        <Stack.Screen name="(tabs)" />
+    <View
+      style={[styles.rootFrame, { backgroundColor: colors.background }]}
+      onLayout={triggerHideSplash}
+    >
+      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          presentation: 'card',
+          animation: reduceMotion ? 'none' : 'slide_from_right',
+          gestureEnabled: true,
+          contentStyle: { backgroundColor: colors.background },
+        }}
+      >
+        <Stack.Protected guard={Boolean(session)} redirectTo="/(auth)/login">
+          <Stack.Screen name="(tabs)" options={fadeScreenOptions} />
+          <Stack.Screen
+            name="subject-form"
+            options={{ ...modalHeaderOptions, title: 'New subject' }}
+          />
+          <Stack.Screen
+            name="slot-form"
+            options={{ ...modalHeaderOptions, title: 'New class' }}
+          />
+          <Stack.Screen
+            name="timetable-import"
+            options={{ ...modalHeaderOptions, title: 'Import timetable' }}
+          />
+          <Stack.Screen
+            name="starting-attendance"
+            options={{ ...modalHeaderOptions, title: 'Starting attendance' }}
+          />
+          <Stack.Screen
+            name="past-attendance"
+            options={{ ...modalHeaderOptions, title: 'Past attendance' }}
+          />
+          <Stack.Screen
+            name="subject/[id]"
+            options={{ ...sharedHeaderOptions, title: 'Subject' }}
+          />
+          <Stack.Screen
+            name="simulator"
+            options={{ ...sharedHeaderOptions, title: 'What-if simulator' }}
+          />
+        </Stack.Protected>
+        <Stack.Protected guard={!session} redirectTo="/">
+          <Stack.Screen name="(auth)" options={fadeScreenOptions} />
+        </Stack.Protected>
         <Stack.Screen
-          name="subject-form"
-          options={{ ...modalHeaderOptions, title: 'New subject' }}
+          name="legal/privacy"
+          options={{ ...sharedHeaderOptions, title: 'Privacy Policy' }}
         />
         <Stack.Screen
-          name="slot-form"
-          options={{ ...modalHeaderOptions, title: 'New class' }}
+          name="legal/terms"
+          options={{ ...sharedHeaderOptions, title: 'Terms and Conditions' }}
         />
         <Stack.Screen
-          name="timetable-import"
-          options={{ ...modalHeaderOptions, title: 'Import timetable' }}
+          name="+not-found"
+          options={{ headerShown: false }}
         />
-        <Stack.Screen
-          name="starting-attendance"
-          options={{ ...modalHeaderOptions, title: 'Starting attendance' }}
-        />
-        <Stack.Screen
-          name="past-attendance"
-          options={{ ...modalHeaderOptions, title: 'Past attendance' }}
-        />
-        <Stack.Screen
-          name="subject/[id]"
-          options={{ ...sharedHeaderOptions, title: 'Subject' }}
-        />
-        <Stack.Screen
-          name="simulator"
-          options={{ ...sharedHeaderOptions, title: 'What-if simulator' }}
-        />
-      </Stack.Protected>
-      <Stack.Protected guard={!session} redirectTo="/">
-        <Stack.Screen name="(auth)" />
-      </Stack.Protected>
-      <Stack.Screen
-        name="legal/privacy"
-        options={{ ...sharedHeaderOptions, title: 'Privacy Policy' }}
-      />
-      <Stack.Screen
-        name="legal/terms"
-        options={{ ...sharedHeaderOptions, title: 'Terms and Conditions' }}
-      />
-      <Stack.Screen
-        name="+not-found"
-        options={{ headerShown: false }}
-      />
-    </Stack>
+      </Stack>
+    </View>
   );
 }
 
 export default function RootLayout() {
+  const [fontsLoaded, fontError] = useFonts({
+    [fontFamily.regular]: GeistRegular,
+    [fontFamily.medium]: GeistMedium,
+    [fontFamily.semibold]: GeistSemiBold,
+  });
+
+  const fontsReady = fontsLoaded || Boolean(fontError);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      hideSplashScreen();
+    }, SPLASH_FALLBACK_TIMEOUT_MS);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, []);
+
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <DataProvider>
-          <RemindersProvider>
-            <StatusBar style="dark" />
-            <RootNavigator />
-          </RemindersProvider>
-        </DataProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <DataProvider>
+            <RemindersProvider>
+              <SnackbarProvider>
+                <RootNavigator fontsReady={fontsReady} />
+              </SnackbarProvider>
+            </RemindersProvider>
+          </DataProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  rootFrame: {
+    flex: 1,
+  },
+  bootBackdrop: {
+    flex: 1,
+  },
   errorContainer: {
     justifyContent: 'center',
     paddingVertical: spacing.xl,
@@ -174,27 +242,7 @@ const styles = StyleSheet.create({
   loadingContent: {
     flex: 1,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
+    paddingTop: spacing.xl + 48,
     paddingBottom: spacing.xxl,
-    gap: spacing.lg,
-  },
-  loadingCard: {
-    width: '100%',
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-  },
-  loadingColumn: {
-    flex: 1,
-    gap: spacing.sm,
-  },
-  loadingGrid: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  loadingHalfCard: {
-    flex: 1,
   },
 });
