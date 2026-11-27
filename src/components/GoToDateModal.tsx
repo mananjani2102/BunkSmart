@@ -4,7 +4,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  StyleSheet,
   View,
 } from 'react-native';
 
@@ -13,7 +12,9 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { DATE_FORMAT_ERROR, DateField } from '@/components/ui/DateField';
 import { getTodayDateString, parseTypedDate } from '@/lib/dates';
-import { colors, spacing } from '@/theme/tokens';
+import { useReduceMotion } from '@/lib/motion';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import { shadows, spacing, type ThemeColors } from '@/theme/tokens';
 
 export interface GoToDateModalProps {
   visible: boolean;
@@ -21,10 +22,46 @@ export interface GoToDateModalProps {
   onSelectDate: (dateStr: string) => void;
 }
 
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
+  overlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: colors.scrim,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 400,
+    padding: spacing.lg,
+    gap: spacing.md,
+    backgroundColor: colors.popover,
+    ...shadows.floating,
+  },
+  actions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  actionBtn: {
+    flex: 1,
+  },
+}));
+
 function GoToDateModalBody({
   onClose,
   onSelectDate,
 }: Omit<GoToDateModalProps, 'visible'>) {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
   const [dateText, setDateText] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -91,11 +128,13 @@ export function GoToDateModal({
   onClose,
   onSelectDate,
 }: GoToDateModalProps) {
+  const reduceMotion = useReduceMotion();
+
   return (
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType={reduceMotion ? 'none' : 'fade'}
       onRequestClose={onClose}
     >
       {visible ? (
@@ -104,36 +143,3 @@ export function GoToDateModal({
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: 'rgba(22, 24, 26, 0.45)',
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 400,
-    padding: spacing.lg,
-    gap: spacing.md,
-    backgroundColor: colors.surface,
-  },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  actionBtn: {
-    flex: 1,
-  },
-});

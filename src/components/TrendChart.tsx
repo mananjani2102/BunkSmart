@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { LayoutChangeEvent, StyleSheet, View } from 'react-native';
 import Svg, { Circle, Line, Polyline, Text as SvgText } from 'react-native-svg';
 
@@ -9,18 +9,18 @@ import {
   formatDisplayPercent,
   formatPercentSpoken,
 } from '@/lib/attendance';
-import { colors, spacing } from '@/theme/tokens';
-import { type AttendanceLog, type Subject } from '@/types/db';
+import { useTheme } from '@/theme/ThemeProvider';
+import { fontFamily, spacing } from '@/theme/tokens';
+import { type AttendanceLog } from '@/types/db';
 
 export interface TrendChartProps {
-  subject: Subject;
-  logs: readonly AttendanceLog[];
-}
-
-interface TrendPoint {
-  percent: number;
-  displayPercent: string;
-  spokenPercent: string;
+  target: number;
+  pointCount: number;
+  percentSeries: string;
+  firstDisplay: string;
+  lastDisplay: string;
+  firstSpoken: string;
+  lastSpoken: string;
 }
 
 const CHART_HEIGHT = 168;
@@ -30,10 +30,13 @@ const PAD_TOP = 14;
 const PAD_BOTTOM = 14;
 const GRID_VALUES = [100, 50, 0] as const;
 
-function buildTrendPoints(
-  subject: Subject,
+export function buildTrendChartProps(
+  initialPresent: number,
+  initialTotal: number,
+  targetPercent: number,
   logs: readonly AttendanceLog[]
-): TrendPoint[] {
+): TrendChartProps {
+  const target = clampTarget(targetPercent);
   const ordered = [...logs].sort((a, b) => {
     const dateDiff = a.log_date.localeCompare(b.log_date);
     if (dateDiff !== 0) {
@@ -42,9 +45,13 @@ function buildTrendPoints(
     return a.created_at.localeCompare(b.created_at);
   });
 
-  let attended = Math.max(0, subject.initial_present);
-  let held = Math.max(0, subject.initial_total);
-  const points: TrendPoint[] = [];
+  let attended = Math.max(0, initialPresent);
+  let held = Math.max(0, initialTotal);
+  const percents: number[] = [];
+  let firstDisplay = '--';
+  let lastDisplay = '--';
+  let firstSpoken = '';
+  let lastSpoken = '';
 
   for (const log of ordered) {
     if (log.status === 'cancelled') {
@@ -58,34 +65,60 @@ function buildTrendPoints(
     }
 
     if (held > 0) {
-      points.push({
-        percent: Math.min(100, Math.max(0, (attended * 100) / held)),
-        displayPercent: formatDisplayPercent(attended, held),
-        spokenPercent: formatPercentSpoken(attended, held),
-      });
+      const percent = Math.min(100, Math.max(0, (attended * 100) / held));
+      percents.push(percent);
+      const display = formatDisplayPercent(attended, held);
+      const spoken = formatPercentSpoken(attended, held);
+      if (percents.length === 1) {
+        firstDisplay = display;
+        firstSpoken = spoken;
+      }
+      lastDisplay = display;
+      lastSpoken = spoken;
     }
   }
 
-  return points;
+  return {
+    target,
+    pointCount: percents.length,
+    percentSeries: percents.map((value) => value.toFixed(4)).join(','),
+    firstDisplay,
+    lastDisplay,
+    firstSpoken,
+    lastSpoken,
+  };
 }
 
-export function TrendChart({ subject, logs }: TrendChartProps) {
+export const TrendChart = memo(function TrendChart({
+  target,
+  pointCount,
+  percentSeries,
+  firstDisplay,
+  lastDisplay,
+  firstSpoken,
+  lastSpoken,
+}: TrendChartProps) {
+  const { colors } = useTheme();
   const [chartWidth, setChartWidth] = useState(280);
 
-  const points = useMemo(() => buildTrendPoints(subject, logs), [subject, logs]);
-  const target = clampTarget(subject.target_percent);
-
-  const handleLayout = (event: LayoutChangeEvent) => {
-    const nextWidth = Math.floor(event.nativeEvent.layout.width);
-    if (nextWidth > 0 && nextWidth !== chartWidth) {
-      setChartWidth(nextWidth);
+  const percents = useMemo(() => {
+    if (!percentSeries) {
+      return [];
     }
-  };
+    return percentSeries.split(',').map((raw) => Number(raw));
+  }, [percentSeries]);
 
-  if (points.length < 2) {
+  const handleLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextWidth = Math.floor(event.nativeEvent.layout.width);
+    if (nextWidth > 0) {
+      setChartWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+    }
+  }, []);
+
+  if (pointCount < 2 || percents.length < 2) {
     return (
       <Card style={styles.card}>
-        <AppText variant="heading">Attendance trend</AppText>
+        <AppText variant="heading">Trend</AppText>
         <AppText variant="body" tone="muted">
           Mark a few classes to see the trend.
         </AppText>
@@ -100,36 +133,30 @@ export function TrendChart({ subject, logs }: TrendChartProps) {
     PAD_TOP + ((100 - percent) / 100) * plotHeight;
 
   const xForIndex = (index: number): number =>
-    PAD_LEFT + (index / (points.length - 1)) * plotWidth;
+    PAD_LEFT + (index / (percents.length - 1)) * plotWidth;
 
-  const coords = points.map((point, index) => ({
+  const coords = percents.map((percent, index) => ({
     x: xForIndex(index),
-    y: yForPercent(point.percent),
+    y: yForPercent(percent),
   }));
 
   const polylinePoints = coords
     .map((coord) => `${coord.x.toFixed(1)},${coord.y.toFixed(1)}`)
     .join(' ');
 
-  const firstPoint = points[0];
-  const lastPoint = points[points.length - 1];
   const lastCoord = coords[coords.length - 1];
   const targetY = yForPercent(target);
+  const targetLabelY = target > 88 ? targetY + 13 : targetY - 5;
 
   return (
     <Card style={styles.card}>
-      <View style={styles.headerRow}>
-        <AppText variant="heading">Attendance trend</AppText>
-        <AppText variant="caption" tone="muted" style={styles.targetCaption}>
-          Target {target}%
-        </AppText>
-      </View>
+      <AppText variant="heading">Trend</AppText>
 
       <View
         onLayout={handleLayout}
         accessible
         accessibilityRole="image"
-        accessibilityLabel={`Attendance trend from ${firstPoint.spokenPercent} to ${lastPoint.spokenPercent}, target ${target} percent`}
+        accessibilityLabel={`Trend from ${firstSpoken} to ${lastSpoken}, target ${target} percent`}
         style={styles.chartWrapper}
       >
         <Svg width={chartWidth} height={CHART_HEIGHT}>
@@ -155,7 +182,8 @@ export function TrendChart({ subject, logs }: TrendChartProps) {
                 key={`label-${gridValue}`}
                 x={PAD_LEFT - 6}
                 y={y + 4}
-                fill={colors.textMuted}
+                fill={colors.mutedForeground}
+                fontFamily={fontFamily.regular}
                 fontSize={11}
                 textAnchor="end"
               >
@@ -169,15 +197,26 @@ export function TrendChart({ subject, logs }: TrendChartProps) {
             y1={targetY}
             x2={chartWidth - PAD_RIGHT}
             y2={targetY}
-            stroke={colors.textMuted}
+            stroke={colors.mutedForeground}
             strokeWidth={1.5}
             strokeDasharray="4 4"
           />
 
+          <SvgText
+            x={chartWidth - PAD_RIGHT}
+            y={targetLabelY}
+            fill={colors.mutedForeground}
+            fontFamily={fontFamily.medium}
+            fontSize={11}
+            textAnchor="end"
+          >
+            {target}%
+          </SvgText>
+
           <Polyline
             points={polylinePoints}
             fill="none"
-            stroke={colors.accent}
+            stroke={colors.foreground}
             strokeWidth={2.5}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -187,8 +226,8 @@ export function TrendChart({ subject, logs }: TrendChartProps) {
             cx={lastCoord.x}
             cy={lastCoord.y}
             r={5}
-            fill={colors.accent}
-            stroke={colors.surface}
+            fill={colors.foreground}
+            stroke={colors.card}
             strokeWidth={2}
           />
         </Svg>
@@ -196,28 +235,19 @@ export function TrendChart({ subject, logs }: TrendChartProps) {
 
       <View style={styles.footerRow}>
         <AppText variant="caption" tone="muted" style={styles.tabular}>
-          First: {firstPoint.displayPercent}
+          First: {firstDisplay}
         </AppText>
         <AppText variant="caption" tone="muted" style={styles.tabular}>
-          Latest: {lastPoint.displayPercent}
+          Latest: {lastDisplay}
         </AppText>
       </View>
     </Card>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {
     gap: spacing.md,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  targetCaption: {
-    fontVariant: ['tabular-nums'],
   },
   chartWrapper: {
     width: '100%',

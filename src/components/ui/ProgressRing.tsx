@@ -1,9 +1,11 @@
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { memo, useMemo } from 'react';
+import { StyleSheet, View } from 'react-native';
 import Svg, { Circle, Line } from 'react-native-svg';
 
 import { AppText } from '@/components/ui/AppText';
 import { clampTarget, type AttendanceTone } from '@/lib/attendance';
-import { colors } from '@/theme/tokens';
+import { useTheme } from '@/theme/ThemeProvider';
+import { fontFamily, type ThemeColors } from '@/theme/tokens';
 
 export interface ProgressRingProps {
   value: number | null;
@@ -13,15 +15,24 @@ export interface ProgressRingProps {
   tone: AttendanceTone;
   label: string;
   accessibilityLabel: string;
-  style?: StyleProp<ViewStyle>;
 }
 
-const toneColorMap: Record<AttendanceTone, string> = {
-  safe: colors.safe,
-  warn: colors.warn,
-  danger: colors.danger,
-  muted: colors.textMuted,
-};
+function getProgressStrokeColor(
+  tone: AttendanceTone,
+  colors: ThemeColors
+): string {
+  switch (tone) {
+    case 'safe':
+      return colors.success;
+    case 'warn':
+      return colors.amber;
+    case 'danger':
+      return colors.destructive;
+    case 'muted':
+    default:
+      return colors.mutedForeground;
+  }
+}
 
 function getLabelFontSize(size: number, isNoData: boolean): number {
   if (size >= 130) {
@@ -33,79 +44,109 @@ function getLabelFontSize(size: number, isNoData: boolean): number {
   return isNoData ? 11 : 14;
 }
 
-export function ProgressRing({
+/**
+ * Memoized circular progress gauge driven strictly by primitive props.
+ */
+export const ProgressRing = memo(function ProgressRing({
   value,
   target,
   size,
-  strokeWidth = Math.max(6, Math.round(size * 0.09)),
+  strokeWidth,
   tone,
   label,
   accessibilityLabel,
-  style,
 }: ProgressRingProps) {
-  const tickOverhang = 3;
-  const center = size / 2;
-  const ringRadius = Math.max(4, (size - strokeWidth) / 2 - tickOverhang);
-  const circumference = 2 * Math.PI * ringRadius;
+  const { colors } = useTheme();
+  const resolvedStrokeWidth =
+    strokeWidth ?? Math.max(6, Math.round(size * 0.09));
 
-  const clampedValue =
-    value === null ? null : Math.min(100, Math.max(0, value));
-  const showProgress = clampedValue !== null && clampedValue > 0;
-  const dashOffset =
-    clampedValue === null
-      ? circumference
-      : circumference * (1 - clampedValue / 100);
+  const geometry = useMemo(() => {
+    const tickOverhang = 3;
+    const center = size / 2;
+    const ringRadius = Math.max(
+      4,
+      (size - resolvedStrokeWidth) / 2 - tickOverhang
+    );
+    const circumference = 2 * Math.PI * ringRadius;
 
-  const clampedTarget = clampTarget(target);
-  const targetAngle = ((clampedTarget / 100) * 360 - 90) * (Math.PI / 180);
-  const tickInner = ringRadius - strokeWidth / 2 - 2;
-  const tickOuter = ringRadius + strokeWidth / 2 + 2;
-  const x1 = center + tickInner * Math.cos(targetAngle);
-  const y1 = center + tickInner * Math.sin(targetAngle);
-  const x2 = center + tickOuter * Math.cos(targetAngle);
-  const y2 = center + tickOuter * Math.sin(targetAngle);
+    const clampedValue =
+      value === null ? null : Math.min(100, Math.max(0, value));
+    const showProgress = clampedValue !== null && clampedValue > 0;
+    const dashOffset =
+      clampedValue === null
+        ? circumference
+        : circumference * (1 - clampedValue / 100);
 
-  const isNoData = value === null;
-  const fontSize = getLabelFontSize(size, isNoData);
+    const clampedTarget = clampTarget(target);
+    const targetAngle = ((clampedTarget / 100) * 360 - 90) * (Math.PI / 180);
+    const tickInner = ringRadius - resolvedStrokeWidth / 2 - 2;
+    const tickOuter = ringRadius + resolvedStrokeWidth / 2 + 2;
+    const x1 = center + tickInner * Math.cos(targetAngle);
+    const y1 = center + tickInner * Math.sin(targetAngle);
+    const x2 = center + tickOuter * Math.cos(targetAngle);
+    const y2 = center + tickOuter * Math.sin(targetAngle);
+
+    const fontSize = getLabelFontSize(size, value === null);
+
+    return {
+      center,
+      ringRadius,
+      circumference,
+      showProgress,
+      dashOffset,
+      x1,
+      y1,
+      x2,
+      y2,
+      containerStyle: { width: size, height: size },
+      labelStyle: {
+        fontSize,
+        lineHeight: fontSize + 4,
+        maxWidth: size - resolvedStrokeWidth * 2 - 12,
+      },
+      dashArray: `${circumference} ${circumference}`,
+      rotateTransform: `rotate(-90 ${center} ${center})`,
+    };
+  }, [resolvedStrokeWidth, size, target, value]);
 
   return (
     <View
       accessible
       accessibilityRole="image"
       accessibilityLabel={accessibilityLabel}
-      style={[styles.container, { width: size, height: size }, style]}
+      style={[styles.container, geometry.containerStyle]}
     >
       <Svg width={size} height={size}>
         <Circle
-          cx={center}
-          cy={center}
-          r={ringRadius}
+          cx={geometry.center}
+          cy={geometry.center}
+          r={geometry.ringRadius}
           stroke={colors.border}
-          strokeWidth={strokeWidth}
+          strokeWidth={resolvedStrokeWidth}
           fill="none"
         />
 
-        {showProgress ? (
+        {geometry.showProgress ? (
           <Circle
-            cx={center}
-            cy={center}
-            r={ringRadius}
-            stroke={toneColorMap[tone]}
-            strokeWidth={strokeWidth}
-            strokeDasharray={`${circumference} ${circumference}`}
-            strokeDashoffset={dashOffset}
+            cx={geometry.center}
+            cy={geometry.center}
+            r={geometry.ringRadius}
+            stroke={getProgressStrokeColor(tone, colors)}
+            strokeWidth={resolvedStrokeWidth}
+            strokeDasharray={geometry.dashArray}
+            strokeDashoffset={geometry.dashOffset}
             strokeLinecap="round"
             fill="none"
-            transform={`rotate(-90 ${center} ${center})`}
+            transform={geometry.rotateTransform}
           />
         ) : null}
 
         <Line
-          x1={x1}
-          y1={y1}
-          x2={x2}
-          y2={y2}
-          stroke={colors.text}
+          x1={geometry.x1}
+          y1={geometry.y1}
+          x2={geometry.x2}
+          y2={geometry.y2}
+          stroke={colors.foreground}
           strokeWidth={2}
           strokeLinecap="round"
         />
@@ -113,24 +154,17 @@ export function ProgressRing({
 
       <View style={styles.centerOverlay} pointerEvents="none">
         <AppText
-          tone={isNoData ? 'muted' : 'default'}
+          tone="default"
           numberOfLines={1}
           adjustsFontSizeToFit
-          style={[
-            styles.label,
-            {
-              fontSize,
-              lineHeight: fontSize + 4,
-              maxWidth: size - strokeWidth * 2 - 12,
-            },
-          ]}
+          style={[styles.label, geometry.labelStyle]}
         >
           {label}
         </AppText>
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -147,7 +181,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   label: {
-    fontWeight: '600',
+    fontFamily: fontFamily.semibold,
     textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },

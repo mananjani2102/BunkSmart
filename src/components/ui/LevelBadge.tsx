@@ -1,73 +1,96 @@
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { type StyleProp, type ViewStyle } from 'react-native';
 
-import { AppText } from '@/components/ui/AppText';
-import { type AttendanceLevel } from '@/lib/attendance';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { type AppTextTone } from '@/components/ui/AppText';
+import { Badge, type BadgeTone } from '@/components/ui/Badge';
+import {
+  canSkip,
+  clampTarget,
+  meetsTarget,
+  mustAttend,
+  pluralizeClasses,
+  type AttendanceLevel,
+} from '@/lib/attendance';
+import { type ThemeColors } from '@/theme/tokens';
 
 export interface LevelBadgeProps {
   level: AttendanceLevel;
   style?: StyleProp<ViewStyle>;
 }
 
-interface LevelBadgeConfig {
-  label: string;
-  textColor: string;
-  backgroundColor: string;
-}
-
-const LEVEL_CONFIG: Record<AttendanceLevel, LevelBadgeConfig> = {
+const LEVEL_MAP: Record<AttendanceLevel, { label: string; tone: BadgeTone }> = {
   no_data: {
     label: 'No data',
-    textColor: colors.textMuted,
-    backgroundColor: colors.surfaceMuted,
+    tone: 'neutral',
   },
   safe: {
     label: 'On track',
-    textColor: colors.safe,
-    backgroundColor: colors.safeBg,
+    tone: 'success',
   },
   borderline: {
-    label: 'Borderline',
-    textColor: colors.warn,
-    backgroundColor: colors.warnBg,
+    label: 'Low buffer',
+    tone: 'warning',
   },
   below: {
     label: 'Below target',
-    textColor: colors.danger,
-    backgroundColor: colors.dangerBg,
+    tone: 'destructive',
   },
 };
 
-export function LevelBadge({ level, style }: LevelBadgeProps) {
-  const config = LEVEL_CONFIG[level];
-
-  return (
-    <View
-      style={[
-        styles.badge,
-        { backgroundColor: config.backgroundColor },
-        style,
-      ]}
-    >
-      <AppText
-        variant="caption"
-        style={[styles.text, { color: config.textColor }]}
-        numberOfLines={1}
-      >
-        {config.label}
-      </AppText>
-    </View>
-  );
+export function getLevelLabel(level: AttendanceLevel): string {
+  return LEVEL_MAP[level].label;
 }
 
-const styles = StyleSheet.create({
-  badge: {
-    alignSelf: 'flex-start',
-    borderRadius: radius.small,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-  },
-  text: {
-    fontWeight: '600',
-  },
-});
+export function getLevelTextTone(level: AttendanceLevel): AppTextTone {
+  switch (level) {
+    case 'safe':
+      return 'success';
+    case 'borderline':
+      return 'warning';
+    case 'below':
+      return 'danger';
+    case 'no_data':
+    default:
+      return 'muted';
+  }
+}
+
+export function getLevelFillColor(
+  level: AttendanceLevel,
+  colors: ThemeColors
+): string {
+  switch (level) {
+    case 'safe':
+      return colors.success;
+    case 'borderline':
+      return colors.amber;
+    case 'below':
+      return colors.destructive;
+    case 'no_data':
+    default:
+      return colors.mutedForeground;
+  }
+}
+
+export function formatAttendanceActionText(
+  attended: number,
+  held: number,
+  target: number
+): string {
+  if (held <= 0) {
+    return 'No data';
+  }
+
+  const clampedTarget = clampTarget(target);
+  if (!meetsTarget(attended, held, clampedTarget)) {
+    const needed = mustAttend(attended, held, clampedTarget);
+    return `Attend next ${needed} ${pluralizeClasses(needed)}`;
+  }
+
+  const skipCount = canSkip(attended, held, clampedTarget);
+  return `Can skip ${skipCount} ${pluralizeClasses(skipCount)}`;
+}
+
+export function LevelBadge({ level, style }: LevelBadgeProps) {
+  const config = LEVEL_MAP[level];
+  return <Badge label={config.label} tone={config.tone} dot style={style} />;
+}

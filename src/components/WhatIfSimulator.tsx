@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { memo, useState } from 'react';
+import { View } from 'react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { LevelBadge } from '@/components/ui/LevelBadge';
+import { Divider } from '@/components/ui/Divider';
+import { getLevelFillColor } from '@/components/ui/LevelBadge';
 import { Stepper } from '@/components/ui/Stepper';
 import {
   canSkip,
@@ -14,16 +15,15 @@ import {
   getAttendanceLevel,
   getAttendanceRatio,
   getPercentTenths,
-  levelToTone,
   meetsTarget,
   mustAttend,
   pluralizeClasses,
   projectAttendance,
   type AttendanceCounts,
-  type AttendanceTone,
 } from '@/lib/attendance';
 import { addDays, getIsoWeekday, getTodayDateString } from '@/lib/dates';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import { spacing, type ThemeColors } from '@/theme/tokens';
 import { type Subject, type TimetableSlot } from '@/types/db';
 
 export interface WhatIfSimulatorProps {
@@ -35,20 +35,74 @@ export interface WhatIfSimulatorProps {
 const MAX_UPCOMING = 60;
 const FALLBACK_UPCOMING = 4;
 
-const barFillColorMap: Record<AttendanceTone, string> = {
-  safe: colors.safe,
-  warn: colors.warn,
-  danger: colors.danger,
-  muted: colors.textMuted,
-};
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
+  card: {
+    gap: spacing.lg,
+  },
+  steppersRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: spacing.md,
+  },
+  stepperCol: {
+    flex: 1,
+  },
+  resultSection: {
+    gap: spacing.sm,
+  },
+  percentRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+  },
+  projectedPercent: {
+    fontVariant: ['tabular-nums'],
+  },
+  deltaText: {
+    fontVariant: ['tabular-nums'],
+  },
+  barWrapper: {
+    height: 8,
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  barTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.muted,
+    overflow: 'hidden',
+  },
+  barFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  targetMarker: {
+    position: 'absolute',
+    top: 1,
+    bottom: 1,
+    width: 2,
+    marginLeft: -1,
+    backgroundColor: colors.foreground,
+    borderRadius: 1,
+  },
+  presetButtonsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingTop: spacing.xs,
+  },
+  presetButton: {
+    flex: 1,
+  },
+}));
 
 function getInitialUpcoming(
   subjectId: string,
   slots: readonly TimetableSlot[]
-): { upcoming: number; hasSlots: boolean } {
+): number {
   const subjectSlots = slots.filter((slot) => slot.subject_id === subjectId);
   if (subjectSlots.length === 0) {
-    return { upcoming: FALLBACK_UPCOMING, hasSlots: false };
+    return FALLBACK_UPCOMING;
   }
 
   const countByWeekday: Record<number, number> = {};
@@ -63,28 +117,28 @@ function getInitialUpcoming(
     total += countByWeekday[weekday] ?? 0;
   }
 
-  return {
-    upcoming: Math.min(MAX_UPCOMING, total),
-    hasSlots: true,
-  };
+  return Math.min(MAX_UPCOMING, total);
 }
 
-export function WhatIfSimulator({
+export const WhatIfSimulator = memo(function WhatIfSimulator({
   subject,
   counts,
   slots,
 }: WhatIfSimulatorProps) {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+
   const subjectHasSlots = slots.some((slot) => slot.subject_id === subject.id);
 
   const [prevSubjectId, setPrevSubjectId] = useState(subject.id);
-  const [upcoming, setUpcoming] = useState(
-    () => getInitialUpcoming(subject.id, slots).upcoming
+  const [upcoming, setUpcoming] = useState(() =>
+    getInitialUpcoming(subject.id, slots)
   );
   const [skip, setSkip] = useState(0);
 
   if (prevSubjectId !== subject.id) {
     setPrevSubjectId(subject.id);
-    setUpcoming(getInitialUpcoming(subject.id, slots).upcoming);
+    setUpcoming(getInitialUpcoming(subject.id, slots));
     setSkip(0);
   }
 
@@ -117,7 +171,6 @@ export function WhatIfSimulator({
     projected.held,
     target
   );
-  const projectedTone = levelToTone(projectedLevel);
 
   const currentTenths = getPercentTenths(counts.attended, counts.held);
   const projectedTenths = getPercentTenths(projected.attended, projected.held);
@@ -131,10 +184,10 @@ export function WhatIfSimulator({
         projected.held,
         target
       );
-      verdictText = `Stays at or above ${target}%. You could still skip ${remainingSkips} more after this.`;
+      verdictText = `Stays at or above ${target}%. Can skip ${remainingSkips} ${pluralizeClasses(remainingSkips)} after this.`;
     } else {
       const needed = mustAttend(projected.attended, projected.held, target);
-      verdictText = `Drops below ${target}%. Attend the next ${needed} ${pluralizeClasses(needed)} in a row to get back to ${target}%.`;
+      verdictText = `Drops below ${target}%. Attend next ${needed} ${pluralizeClasses(needed)} to reach ${target}%.`;
     }
   }
 
@@ -143,98 +196,78 @@ export function WhatIfSimulator({
 
   return (
     <Card style={styles.card}>
-      <AppText variant="heading">What-if simulator</AppText>
+      <AppText variant="heading">What if you skip?</AppText>
 
-      <View style={styles.controlsGroup}>
+      <View style={styles.steppersRow}>
         <Stepper
           label="Upcoming classes"
+          layout="column"
           value={upcoming}
           min={0}
           max={MAX_UPCOMING}
           onChange={handleUpcomingChange}
+          style={styles.stepperCol}
         />
-
-        {!subjectHasSlots ? (
-          <AppText variant="caption" tone="muted">
-            Add this subject to your timetable to prefill this.
-          </AppText>
-        ) : null}
-
         <Stepper
           label="Classes you skip"
+          layout="column"
           value={safeSkip}
           min={0}
           max={upcoming}
           onChange={setSkip}
+          style={styles.stepperCol}
         />
-
-        <View style={styles.quickButtonsRow}>
-          <View style={styles.quickButtonWrapper}>
-            <Button
-              title="Skip none"
-              variant="secondary"
-              onPress={() => setSkip(0)}
-              disabled={safeSkip === 0}
-              fullWidth
-            />
-          </View>
-          <View style={styles.quickButtonWrapper}>
-            <Button
-              title="Skip all"
-              variant="secondary"
-              onPress={() => setSkip(upcoming)}
-              disabled={upcoming === 0 || safeSkip === upcoming}
-              fullWidth
-            />
-          </View>
-        </View>
       </View>
 
-      <View style={styles.divider} />
+      {!subjectHasSlots ? (
+        <AppText variant="caption" tone="muted">
+          Add this subject to your timetable to prefill this.
+        </AppText>
+      ) : null}
+
+      <Divider />
 
       {!hasProjectedData ? (
         <View style={styles.resultSection}>
-          <View style={styles.resultHeaderRow}>
-            <AppText variant="title" tone="muted">
-              No data
-            </AppText>
-            <LevelBadge level="no_data" />
-          </View>
+          <AppText variant="heading" tone="muted">
+            No data
+          </AppText>
         </View>
       ) : (
         <View style={styles.resultSection}>
-          <View style={styles.resultHeaderRow}>
-            <View style={styles.percentRow}>
-              <AppText variant="title" style={styles.projectedPercent}>
-                {projectedPercentText}
+          <View style={styles.percentRow}>
+            <AppText variant="heading" style={styles.projectedPercent}>
+              {projectedPercentText}
+            </AppText>
+            {deltaText ? (
+              <AppText
+                variant="label"
+                tone={
+                  projectedTenths !== null &&
+                  currentTenths !== null &&
+                  projectedTenths < currentTenths
+                    ? 'danger'
+                    : projectedTenths !== null &&
+                        currentTenths !== null &&
+                        projectedTenths > currentTenths
+                      ? 'success'
+                      : 'muted'
+                }
+                style={styles.deltaText}
+              >
+                {deltaText}
               </AppText>
-              {deltaText ? (
-                <AppText
-                  variant="label"
-                  tone={
-                    projectedTenths !== null &&
-                    currentTenths !== null &&
-                    projectedTenths < currentTenths
-                      ? 'danger'
-                      : projectedTenths !== null &&
-                          currentTenths !== null &&
-                          projectedTenths > currentTenths
-                        ? 'safe'
-                        : 'muted'
-                  }
-                  style={styles.deltaText}
-                >
-                  {deltaText}
-                </AppText>
-              ) : null}
-            </View>
-            <LevelBadge level={projectedLevel} />
+            ) : null}
           </View>
+
+          {verdictText ? (
+            <AppText variant="body">{verdictText}</AppText>
+          ) : null}
 
           <View
             accessible
             accessibilityLabel={`Projected attendance ${projectedPercentText}, target ${target} percent`}
-            style={styles.barContainer}
+            style={styles.barWrapper}
           >
             <View style={styles.barTrack}>
               <View
@@ -242,7 +275,7 @@ export function WhatIfSimulator({
                   styles.barFill,
                   {
                     width: `${fillWidthPercent}%`,
-                    backgroundColor: barFillColorMap[projectedTone],
+                    backgroundColor: getLevelFillColor(projectedLevel, colors),
                   },
                 ]}
               />
@@ -252,90 +285,25 @@ export function WhatIfSimulator({
               style={[styles.targetMarker, { left: `${target}%` }]}
             />
           </View>
-
-          <AppText variant="caption" tone="muted">
-            Target {target}%
-          </AppText>
-
-          {verdictText ? (
-            <AppText variant="body" style={styles.verdictText}>
-              {verdictText}
-            </AppText>
-          ) : null}
         </View>
       )}
+
+      <View style={styles.presetButtonsRow}>
+        <Button
+          title="Skip none"
+          variant="secondary"
+          onPress={() => setSkip(0)}
+          disabled={safeSkip === 0}
+          style={styles.presetButton}
+        />
+        <Button
+          title="Skip all"
+          variant="secondary"
+          onPress={() => setSkip(upcoming)}
+          disabled={upcoming === 0 || safeSkip === upcoming}
+          style={styles.presetButton}
+        />
+      </View>
     </Card>
   );
-}
-
-const styles = StyleSheet.create({
-  card: {
-    gap: spacing.lg,
-  },
-  controlsGroup: {
-    gap: spacing.md,
-  },
-  quickButtonsRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  quickButtonWrapper: {
-    flex: 1,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
-  },
-  resultSection: {
-    gap: spacing.sm,
-  },
-  resultHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  percentRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: spacing.sm,
-    flexWrap: 'wrap',
-    flex: 1,
-  },
-  projectedPercent: {
-    fontVariant: ['tabular-nums'],
-  },
-  deltaText: {
-    fontVariant: ['tabular-nums'],
-  },
-  barContainer: {
-    height: 20,
-    justifyContent: 'center',
-    marginTop: spacing.xs,
-  },
-  barTrack: {
-    height: 10,
-    borderRadius: radius.small,
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
-  },
-  barFill: {
-    height: '100%',
-    borderRadius: radius.small,
-  },
-  targetMarker: {
-    position: 'absolute',
-    top: 1,
-    bottom: 1,
-    width: 2,
-    marginLeft: -1,
-    backgroundColor: colors.text,
-    borderRadius: 1,
-  },
-  verdictText: {
-    marginTop: spacing.xs,
-  },
 });
