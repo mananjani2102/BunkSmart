@@ -2,15 +2,25 @@
 
 BunkSmart tracks class attendance per subject against your target percentage and calculates how many upcoming classes you can skip or must attend in a row.
 
-[Download](#download-and-demo) | [Features](#features) | [How it works](#how-the-numbers-work) | [Getting started](#getting-started)
+[Screenshots](#screenshots) | [Download](#download-and-demo) | [Features](#features) | [How it works](#how-the-numbers-work) | [Getting started](#getting-started)
+
+## Screenshots
+
+| <img src="docs/screenshots/01-overview.jpg" width="240" alt="Overview screen" /> | <img src="docs/screenshots/02-today.jpg" width="240" alt="Today screen" /> | <img src="docs/screenshots/07-subjects.jpg" width="240" alt="Subjects screen" /> |
+| :---: | :---: | :---: |
+| Overview dashboard | Today attendance marking | Subjects list |
+| <img src="docs/screenshots/05-timetable.jpg" width="240" alt="Timetable screen" /> | <img src="docs/screenshots/08-profile.jpg" width="240" alt="Profile screen" /> | <img src="docs/screenshots/04-what-if.jpg" width="240" alt="What-if simulator screen" /> |
+| Weekly timetable | Profile and settings | What-if simulator |
 
 ## Download and demo
 
 Download the Android preview build to try BunkSmart on a physical Android device:
 
-[Download Android APK](https://expo.dev/artifacts/eas/qai9_SRMkO6XgheR2ggHKNREMZMo8fZ-G5eUZWev7tI.apk)
+[Download Android APK](https://github.com/mananjani2102/BunkSmart/releases/download/v1.0.0/BunkSmart-v1.0.0.apk)
 
-On Android, allow installs from unknown sources for your browser or file manager when prompted before opening the APK.
+[Alternative link (may expire)](https://expo.dev/artifacts/eas/qai9_SRMkO6XgheR2ggHKNREMZMo8fZ-G5eUZWev7tI.apk)
+
+On Android, allow installs from unknown sources when prompted before opening the APK.
 
 You can sign in immediately using the demo account below or create a new account in the app:
 
@@ -19,11 +29,13 @@ You can sign in immediately using the demo account below or create a new account
 | Email | `demo@bunksmart.app` |
 | Password | `BunkSmart@2026` |
 
+This is a shared account used for demonstration, and its data may be reset at any time.
+
 ## Overview
 
 If your college portal shows only an overall attendance percentage, you cannot see how many classes you can skip in each subject before dropping below your required threshold. Calculating those skip limits manually across different weekly schedules and cancelled classes quickly becomes error-prone.
 
-BunkSmart solves this by tracking each subject against its own target percentage while keeping an optional link to your college portal's overall count. The app updates the screen immediately when you mark a class and syncs your records in the background over an active network connection.
+BunkSmart tracks each subject against its own target percentage. The app never connects to any college system, and you can enter your portal's overall attended and held counts once, as numbers, so the overall figure matches the portal. When you mark a class, the app updates the screen immediately and syncs your records in the background over an active network connection.
 
 ## Features
 
@@ -52,7 +64,7 @@ BunkSmart solves this by tracking each subject against its own target percentage
 ### Settings and experience
 
 - Choose a default target percentage (50% to 95%) for new subjects and override targets per subject.
-- Enable local class reminders 5, 10, 15, or 30 minutes before scheduled classes on Android and iOS.
+- Enable local class reminders 5, 10, 15, or 30 minutes before scheduled classes (tested on Android only).
 - Switch between System, Light, and Dark monochrome themes at any time.
 - View the Privacy Policy and Terms and Conditions, or delete all attendance data while keeping your account.
 
@@ -68,18 +80,20 @@ When `H` is `0`, no percentage or allowance is shown yet. When `H > 0` and your 
 skip = floor((100 * A - T * H) / T)
 ```
 
-When `H > 0` and your attendance is below the target (`100 * A < T * H`), the number of consecutive classes you must attend to recover in [`src/lib/attendance.ts`](src/lib/attendance.ts) uses integer ceiling division:
+When `H > 0` and your attendance is below the target (`100 * A < T * H`), the number of consecutive classes you must attend to recover is:
 
 ```text
 need = T * H - 100 * A
 denominator = 100 - T
-attend = floor((need + denominator - 1) / denominator)
+attend = ceil(need / denominator)
 ```
+
+In [`src/lib/attendance.ts`](src/lib/attendance.ts), this ceiling division is computed using whole numbers only.
 
 Worked examples at a 75% target:
 
 - **Skipping**: With `18` attended of `22` held (`81.8%`), `100 * 18 - 75 * 22 = 150`, and `floor(150 / 75) = 2`. You can skip `2` classes (`18` of `24` is `75%`) and stay on target.
-- **Recovering**: With `15` attended of `22` held (`68.1%`), `need = 75 * 22 - 100 * 15 = 150` and `denominator = 25`, giving `floor((150 + 25 - 1) / 25) = 6`. Attending the next `6` classes in a row brings you to `21` of `28`, which is `75%`.
+- **Recovering**: With `15` attended of `22` held (`68.1%`), `need = 75 * 22 - 100 * 15 = 150` and `denominator = 25`, giving `ceil(150 / 25) = 6`. Attending the next `6` classes in a row brings you to `21` of `28`, which is `75%`.
 
 ### Overall percentage
 
@@ -102,12 +116,12 @@ Versions below come directly from [`package.json`](package.json) and [`app.json`
 | Area | Technology | Purpose |
 | --- | --- | --- |
 | Framework | Expo SDK 58 (`expo` `~58.1.0`) | Managed React Native runtime, asset loading, and Expo Go support |
-| UI runtime | React Native `0.88.1`, React `19.3.0` | Cross-platform mobile and web rendering with New Architecture enabled |
+| UI runtime | React Native `0.88.1`, React `19.3.0` | Built and tested on Android with New Architecture enabled |
 | Language | TypeScript `~6.0.3` | Strict static typing across screens, state, and database rows |
 | Navigation | Expo Router `~58.0.33` | File-based stack, modal, protected auth, and tab routes under `src/app` |
 | Backend | `@supabase/supabase-js` `^2.119.0` | Email/password authentication and Postgres data access with RLS |
 | Graphics | `react-native-svg` `15.16.0` | Circular progress rings and per-subject attendance trend charts |
-| Notifications | `expo-notifications` `~58.1.10` | Weekly local class reminders on Android and iOS |
+| Notifications | `expo-notifications` `~58.1.10` | Weekly local class reminders (tested on Android only) |
 | Haptics | `expo-haptics` `~58.0.8` | Tactile feedback on attendance marks and destructive confirmations |
 | Builds | EAS Build (`eas.json` `preview` profile) | Cloud Android APK generation for internal distribution |
 | Typography | Geist via `expo-font` `~58.0.12` | Static `Geist-Regular`, `Geist-Medium`, and `Geist-SemiBold` font weights |
@@ -132,21 +146,20 @@ Important directories and files in the repository:
 ```text
 app.json                  Expo config, icons, splash screens, and Android settings
 eas.json                  EAS Build preview profile for Android APK builds
-metro.config.js           Metro bundler config with capped worker count
 package.json              Dependencies and verification scripts
 supabase/schema.sql       Postgres schema, view, triggers, RLS policies, and grants
-scripts/                  Math, date, parser verification scripts and repo audit
-docs/                     Architecture, data model, theme, performance, and rules
+scripts/                  Math, date, and parser verification scripts plus repo audit
+docs/                     Architecture, data model, theme, performance, rules, and screenshots
 assets/fonts/             Bundled Geist static font files (Regular, Medium, SemiBold)
-assets/images/            Monochrome app icon, adaptive foreground, splash, notification icon
-src/app/                  Expo Router layouts, tabs, auth screens, and modal forms
+assets/images/            App icon, adaptive foreground, splash, and notification icon
+src/app/                  Expo Router screens, tabs, auth flow, and modal forms
 src/components/           Feature views, skeletons, and reusable UI primitives
 src/constants/            In-app Privacy Policy and Terms and Conditions text
 src/context/              Split Auth, Data, Reminders, and Snackbar providers
 src/data/                 Typed Supabase CRUD and aggregation helpers
 src/lib/                  Math engine, overall logic, dates, parser, errors, reminders
-src/theme/                Monochrome light/dark tokens, theme provider, header options
-src/types/                Database row interfaces and asset module declarations
+src/theme/                Monochrome light/dark tokens, theme provider, navigation options
+src/types/                Database row interfaces and asset declarations
 ```
 
 ## Database
@@ -155,7 +168,7 @@ Schema definitions live in [`supabase/schema.sql`](supabase/schema.sql), and fie
 
 | Object | Kind | Purpose |
 | --- | --- | --- |
-| `profiles` | Table | Stores per-user `full_name`, `default_target` (50 to 95), and optional college baseline fields |
+| `profiles` | Table | Stores per-user `full_name`, `default_target` (50 to 95), and optional college baseline counts (`baseline_attended`, `baseline_held`, `baseline_date`) |
 | `subjects` | Table | Stores tracked courses, unique case-insensitive names per user, targets, and starting counts |
 | `timetable_slots` | Table | Stores weekly class slots (`weekday` 1 to 7, `start_time`, optional `end_time`) |
 | `attendance_logs` | Table | Stores daily `present`, `absent`, or `cancelled` records keyed by local `log_date` and `slot_id` |
@@ -163,16 +176,14 @@ Schema definitions live in [`supabase/schema.sql`](supabase/schema.sql), and fie
 | `on_auth_user_created` and `set_updated_at` | Triggers | Creates a `profiles` row on sign-up via `handle_new_user()` and keeps `updated_at` current on updates |
 | `profiles_*_own`, `subjects_own`, `timetable_slots_own`, `attendance_logs_own` | RLS policies | Restricts authenticated queries and writes so users access only rows matching `auth.uid()` |
 
-Note: [`src/context/AuthProvider.tsx`](src/context/AuthProvider.tsx) and [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) also expect `baseline_attended`, `baseline_held`, and `baseline_date` columns on `public.profiles`, which are not yet included in [`supabase/schema.sql`](supabase/schema.sql).
-
 ## Technical decisions
 
-- **Whole-number attendance math and truncated display**: [`src/lib/attendance.ts`](src/lib/attendance.ts) evaluates `100 * A >= T * H` with integers and truncates percentages to tenths via `Math.floor((A * 1000) / H)`, so floating-point precision cannot flip a threshold check and a value below target never rounds up to look like target.
-- **Local calendar dates instead of UTC**: [`src/lib/dates.ts`](src/lib/dates.ts) formats `YYYY-MM-DD` strings from local `Date` components and avoids `toISOString`, preventing timezone offsets near midnight from shifting logs onto the wrong date.
-- **Immediate local updates with background sync and split contexts**: [`src/context/DataProvider.tsx`](src/context/DataProvider.tsx) separates state, stats, derived totals, date logs, and actions into distinct contexts, caches snapshots in `AsyncStorage` with a 30-second freshness window, updates UI state immediately on taps, and rolls back if Supabase returns an error.
-- **Per-user row level security and server-filled `user_id`**: [`supabase/schema.sql`](supabase/schema.sql) defaults `user_id` to `auth.uid()` and enables RLS on every table, so [`src/data`](src/data) never sends `user_id` from the client on inserts.
-- **Native-driven animations with a custom tab bar**: [`src/lib/motion.ts`](src/lib/motion.ts) shares one `Animated.Value` pulse across skeletons and listens to the system reduce-motion setting, while [`src/components/ui/TabBar.tsx`](src/components/ui/TabBar.tsx) and UI motion wrappers animate only `opacity` and `transform` with the native driver.
-- **On-device timetable parser with no network calls**: [`src/lib/timetableParser.ts`](src/lib/timetableParser.ts) parses day headers, inline days, 12-hour and 24-hour times, assumed durations, and break lines locally in TypeScript so raw pasted schedules never leave the device.
+- **Whole-number attendance math**: [`src/lib/attendance.ts`](src/lib/attendance.ts) uses integer boundary checks (`100 * A >= T * H`) and truncates display percentages to tenths so rounding cannot flip a target result.
+- **Local calendar dates**: [`src/lib/dates.ts`](src/lib/dates.ts) builds `YYYY-MM-DD` strings from local `Date` components instead of `toISOString` so midnight timezone offsets do not shift dates.
+- **Immediate local updates with background sync**: [`src/context/DataProvider.tsx`](src/context/DataProvider.tsx) splits contexts, caches per-user snapshots for 30 seconds, updates screens immediately, and rolls back on errors.
+- **Per-user row level security**: [`supabase/schema.sql`](supabase/schema.sql) enables RLS on all tables and fills `user_id` from `auth.uid()`, so client inserts never supply `user_id`.
+- **Native-driven animations with custom tab bar**: [`src/components/ui/TabBar.tsx`](src/components/ui/TabBar.tsx) and motion helpers animate only `opacity` and `transform` on the native driver while respecting reduce-motion.
+- **On-device timetable parser**: [`src/lib/timetableParser.ts`](src/lib/timetableParser.ts) parses pasted schedules locally in TypeScript with no network calls so raw timetable text stays on the device.
 
 ## Getting started
 
@@ -201,7 +212,7 @@ Note: [`src/context/AuthProvider.tsx`](src/context/AuthProvider.tsx) and [`docs/
 
    The publishable key is designed to be used in a client app because row level security restricts every table per user, and a secret or `service_role` key must never be put in the app.
 
-3. Open **SQL Editor** in your Supabase project and run [`supabase/schema.sql`](supabase/schema.sql), then ensure `public.profiles` includes the `baseline_attended`, `baseline_held`, and `baseline_date` columns listed in [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md).
+3. Run [`supabase/schema.sql`](supabase/schema.sql) once in the Supabase SQL Editor on a fresh project.
 4. In the Supabase dashboard, open **Authentication**, **Sign In / Providers**, **Email**, and turn off **Confirm email** if you want immediate sign-in after account creation.
 5. Start the Metro development server:
 
@@ -213,49 +224,17 @@ Note: [`src/context/AuthProvider.tsx`](src/context/AuthProvider.tsx) and [`docs/
 
 ## Verification
 
-[`package.json`](package.json) includes seven check and verification scripts:
+[`package.json`](package.json) provides seven check and verification scripts:
 
-- `typecheck`: runs strict TypeScript type checking across the project.
-
-  ```bash
-  npm run typecheck
-  ```
-
-- `lint`: runs ESLint via Expo configuration across source and script files.
-
-  ```bash
-  npm run lint
-  ```
-
-- `audit`: checks source and docs for forbidden patterns such as em/en dashes, emoji, `console.log`, gradients, AI attribution, and unfinished task markers.
-
-  ```bash
-  npm run audit
-  ```
-
-- `verify:math`: verifies subject skip allowances, recovery counts, truncated percentages, projections, and attendance levels in [`scripts/verify-attendance.ts`](scripts/verify-attendance.ts).
-
-  ```bash
-  npm run verify:math
-  ```
-
-- `verify:overall`: verifies college figure mode and tracked mode overall calculations in [`scripts/verify-overall.ts`](scripts/verify-overall.ts).
-
-  ```bash
-  npm run verify:overall
-  ```
-
-- `verify:dates`: verifies typed `DD/MM/YYYY` date parsing, formatting, and weekday occurrence counts in [`scripts/verify-dates.ts`](scripts/verify-dates.ts).
-
-  ```bash
-  npm run verify:dates
-  ```
-
-- `verify:parser`: verifies plain-text timetable parsing, time inference, break ignoring, duplicate checks, and error reporting in [`scripts/verify-timetable-parser.ts`](scripts/verify-timetable-parser.ts).
-
-  ```bash
-  npm run verify:parser
-  ```
+| Command | What it checks |
+| --- | --- |
+| `npm run typecheck` | Strict TypeScript types across the project |
+| `npm run lint` | ESLint rules via Expo configuration across source and script files |
+| `npm run audit` | Forbidden patterns (em/en dashes, emoji, `console.log`, gradients, unfinished task markers) across `src`, `scripts`, `docs`, and `README.md` |
+| `npm run verify:math` | Skip allowances, recovery counts, truncated percentages, projections, and attendance levels in [`scripts/verify-attendance.ts`](scripts/verify-attendance.ts) |
+| `npm run verify:overall` | Overall attendance calculations in college figure mode and tracked mode in [`scripts/verify-overall.ts`](scripts/verify-overall.ts) |
+| `npm run verify:dates` | Typed `DD/MM/YYYY` parsing, formatting, and weekday occurrence counts in [`scripts/verify-dates.ts`](scripts/verify-dates.ts) |
+| `npm run verify:parser` | Plain-text timetable parsing, time inference, break ignoring, duplicate checks, and error reporting in [`scripts/verify-timetable-parser.ts`](scripts/verify-timetable-parser.ts) |
 
 ## Build the APK
 
@@ -278,12 +257,11 @@ On your first Android build, EAS offers to generate and store a signing keystore
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Database `"permission denied"` or `"The database refused access"` (code `42501`) | Table or view `GRANT` statements were skipped | Open the Supabase SQL Editor and rerun the `grant` statements at the end of [`supabase/schema.sql`](supabase/schema.sql) |
+| Database `"permission denied"` or `"The database refused access"` (code `42501`) | Table or view `GRANT` statements were skipped | Open the Supabase SQL Editor and rerun the `grant` statements in [`supabase/schema.sql`](supabase/schema.sql) |
 | Startup error `"Missing Supabase configuration"` | `.env` is missing or one of the two Supabase keys is empty | Copy [`.env.example`](.env.example) to `.env`, set both values, and restart the dev server |
 | Network timeouts or failed requests on an existing project | Free-tier Supabase projects pause after a week of inactivity | Open the Supabase dashboard and restore the paused project |
 | Expo Go refuses to open the project | Expo Go on the phone does not match Expo SDK 58 | Install Expo Go for SDK 58 or build the preview APK with EAS Build |
-| Class reminders do not appear or arrive late on Android | Some Expo Go builds omit local reminder support, or exact alarms are disabled | Use an Android APK build, allow notifications, and enable **Alarms and reminders** in Android settings |
-| Profile fetch fails on a fresh Supabase project | `baseline_attended`, `baseline_held`, and `baseline_date` are missing from `public.profiles` | Add those columns and the `profiles_baseline_valid` check documented in [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) |
+| Class reminders do not appear | Notification permission is turned off for the app | Open **Profile**, turn reminders on, and use the **Open settings** button to enable notifications |
 
 ## Limitations and roadmap
 
@@ -291,7 +269,7 @@ On your first Android build, EAS offers to generate and store a signing keystore
 
 - Timetable estimates do not know about holidays or cancelled classes, so adjust estimated held counts manually when needed.
 - Past dates on the Today screen display your current timetable rather than a historical snapshot of past timetable changes.
-- Class reminders are scheduled locally on one device only, do not sync across devices, and are unavailable on web browsers.
+- Class reminders are scheduled locally on one device only, do not sync across devices, and were tested on Android only.
 - Free Supabase projects pause automatically after a week of inactivity.
 
 ### Not included yet
@@ -303,12 +281,12 @@ On your first Android build, EAS offers to generate and store a signing keystore
 
 ## Privacy and terms
 
-Both the Privacy Policy and Terms and Conditions are available inside the app under **Profile** (and linked from the Sign up screen). BunkSmart stores your account name, email, Supabase-managed password hash, subjects, weekly timetable slots, attendance logs, and optional starting counts in Supabase Postgres, while theme mode, reminder preferences, and cached snapshots are stored locally on your device.
+Both the Privacy Policy and Terms and Conditions are available inside the app under **Profile** (and linked from the Sign up screen). BunkSmart stores your account details, subjects, timetable slots, attendance logs, and optional starting counts in Supabase Postgres. On your device, it stores your login session, the theme mode, reminder settings, and a cached copy of your profile, subjects, timetable, and attendance for faster loading. When you log out, all of that user data is removed and only the theme mode stays on your device.
 
 ## Credits and license
 
 - Typography uses the Geist font by Vercel under the SIL Open Font License, bundled in [`assets/fonts`](assets/fonts).
-- This repository contains an MIT license file at [`LICENSE`](LICENSE) carrying the Expo template copyright notice.
+- This project is licensed under the MIT License; see [`LICENSE`](LICENSE).
 
 ## Author
 
