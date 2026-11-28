@@ -1,173 +1,36 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { ScrollView, View } from 'react-native';
 
+import { SimulatorSkeleton } from '@/components/SkeletonLayouts';
 import { WhatIfSimulator } from '@/components/WhatIfSimulator';
 import { AppText } from '@/components/ui/AppText';
-import { Card } from '@/components/ui/Card';
+import { ContentFade } from '@/components/ui/ContentFade';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { FadeView } from '@/components/ui/FadeView';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Screen } from '@/components/ui/Screen';
-import { Skeleton } from '@/components/ui/Skeleton';
-import { useData } from '@/context/DataProvider';
-import { colors, radius, spacing } from '@/theme/tokens';
+import {
+  useDataActions,
+  useDataState,
+  useDataStats,
+} from '@/context/DataProvider';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import {
+  fontFamily,
+  radius,
+  spacing,
+  type ThemeColors,
+} from '@/theme/tokens';
 
 const SIMULATOR_EDGES = ['bottom', 'left', 'right'] as const;
 
-export default function SimulatorScreen() {
-  const params = useLocalSearchParams<{ subjectId?: string }>();
-  const paramSubjectId =
-    typeof params.subjectId === 'string' && params.subjectId.length > 0
-      ? params.subjectId
-      : undefined;
-
-  const { status, error, subjects, slots, statsBySubject, reload } = useData();
-  const [selectedId, setSelectedId] = useState<string | undefined>(
-    paramSubjectId
-  );
-
-  const selectedSubject =
-    subjects.find((item) => item.id === selectedId) ??
-    (paramSubjectId
-      ? subjects.find((item) => item.id === paramSubjectId)
-      : undefined) ??
-    subjects[0];
-
-  if (status === 'loading') {
-    return (
-      <Screen edges={SIMULATOR_EDGES} contentContainerStyle={styles.content}>
-        <View
-          accessible
-          accessibilityLabel="Loading simulator"
-          style={styles.skeletonGroup}
-        >
-          <Skeleton width={80} height={16} />
-          <View style={styles.chipRow}>
-            <Skeleton width={104} height={44} />
-            <Skeleton width={120} height={44} />
-          </View>
-          <Card style={styles.skeletonCard}>
-            <Skeleton width="55%" height={20} />
-            <Skeleton width="100%" height={44} />
-            <Skeleton width="100%" height={44} />
-            <Skeleton width="100%" height={48} />
-          </Card>
-        </View>
-      </Screen>
-    );
-  }
-
-  if (status === 'error') {
-    return (
-      <Screen edges={SIMULATOR_EDGES}>
-        <ErrorState
-          message={error ?? 'Something went wrong. Try again.'}
-          onRetry={() => {
-            void reload();
-          }}
-          style={styles.stateCard}
-        />
-      </Screen>
-    );
-  }
-
-  if (!selectedSubject) {
-    return (
-      <Screen edges={SIMULATOR_EDGES}>
-        <EmptyState
-          icon="calculator-outline"
-          title="No subjects yet"
-          message="Add a subject before simulating upcoming classes."
-          actionLabel="Add a subject"
-          onAction={() => router.replace('/(tabs)/subjects')}
-          style={styles.stateCard}
-        />
-      </Screen>
-    );
-  }
-
-  const stats = statsBySubject[selectedSubject.id];
-  const counts = {
-    attended: stats?.attended ?? selectedSubject.initial_present,
-    held: stats?.conducted ?? selectedSubject.initial_total,
-  };
-
-  return (
-    <Screen scroll edges={SIMULATOR_EDGES} contentContainerStyle={styles.content}>
-      <View style={styles.pickerSection}>
-        <AppText variant="label" tone="muted">
-          Subject
-        </AppText>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}
-        >
-          {subjects.map((subject) => {
-            const isSelected = subject.id === selectedSubject.id;
-            return (
-              <PressableScale
-                key={subject.id}
-                onPress={() => setSelectedId(subject.id)}
-                scaleTo={0.96}
-                rippleColor={
-                  isSelected ? colors.rippleOnAccent : colors.rippleNeutral
-                }
-                accessibilityRole="button"
-                accessibilityLabel={subject.name}
-                accessibilityState={{ selected: isSelected }}
-                containerStyle={[
-                  styles.chipContainer,
-                  isSelected && styles.chipSelected,
-                ]}
-                style={({ pressed }) => [
-                  styles.chip,
-                  pressed &&
-                    (isSelected
-                      ? styles.chipSelectedPressed
-                      : styles.chipPressed),
-                ]}
-              >
-                <AppText
-                  variant="label"
-                  tone={isSelected ? 'onAccent' : 'default'}
-                  numberOfLines={1}
-                  style={isSelected && styles.chipTextSelected}
-                >
-                  {subject.name}
-                </AppText>
-              </PressableScale>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      <FadeView transitionKey={selectedSubject.id}>
-        <WhatIfSimulator
-          key={selectedSubject.id}
-          subject={selectedSubject}
-          counts={counts}
-          slots={slots}
-        />
-      </FadeView>
-    </Screen>
-  );
-}
-
-const styles = StyleSheet.create({
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
   content: {
     paddingTop: spacing.md,
     paddingBottom: spacing.xxl,
     gap: spacing.lg,
-  },
-  skeletonGroup: {
-    gap: spacing.md,
-  },
-  skeletonCard: {
-    gap: spacing.md,
   },
   stateCard: {
     marginTop: spacing.lg,
@@ -186,7 +49,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.control,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.card,
     overflow: 'hidden',
   },
   chip: {
@@ -197,16 +60,170 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chipSelected: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   chipPressed: {
-    backgroundColor: colors.surfacePressed,
+    backgroundColor: colors.muted,
   },
-  chipSelectedPressed: {
-    backgroundColor: colors.accentPressed,
+  chipTextDefault: {
+    color: colors.foreground,
+    fontFamily: fontFamily.medium,
   },
   chipTextSelected: {
-    fontWeight: '600',
+    color: colors.primaryForeground,
+    fontFamily: fontFamily.semibold,
   },
+}));
+
+interface SubjectChipProps {
+  id: string;
+  name: string;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+}
+
+const SubjectChip = memo(function SubjectChip({
+  id,
+  name,
+  isSelected,
+  onSelect,
+}: SubjectChipProps) {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+
+  return (
+    <PressableScale
+      onPress={() => onSelect(id)}
+      scaleTo={0.96}
+      rippleColor={isSelected ? colors.ripplePrimary : colors.rippleNeutral}
+      accessibilityRole="button"
+      accessibilityLabel={name}
+      accessibilityState={{ selected: isSelected }}
+      containerStyle={[
+        styles.chipContainer,
+        isSelected && styles.chipSelected,
+      ]}
+      style={({ pressed }) => [
+        styles.chip,
+        pressed && !isSelected && styles.chipPressed,
+      ]}
+    >
+      <AppText
+        variant="label"
+        numberOfLines={1}
+        style={isSelected ? styles.chipTextSelected : styles.chipTextDefault}
+      >
+        {name}
+      </AppText>
+    </PressableScale>
+  );
 });
+
+export default function SimulatorScreen() {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+  const params = useLocalSearchParams<{ subjectId?: string }>();
+  const paramSubjectId =
+    typeof params.subjectId === 'string' && params.subjectId.length > 0
+      ? params.subjectId
+      : undefined;
+
+  const { status, error, subjects, slots } = useDataState();
+  const { statsBySubject } = useDataStats();
+  const { reload } = useDataActions();
+  const [selectedId, setSelectedId] = useState<string | undefined>(
+    paramSubjectId
+  );
+
+  const selectedSubject = useMemo(
+    () =>
+      subjects.find((item) => item.id === selectedId) ??
+      (paramSubjectId
+        ? subjects.find((item) => item.id === paramSubjectId)
+        : undefined) ??
+      subjects[0],
+    [paramSubjectId, selectedId, subjects]
+  );
+
+  const handleSelectSubject = useCallback((id: string) => {
+    setSelectedId(id);
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    void reload(true);
+  }, [reload]);
+
+  const selectedStats = selectedSubject
+    ? statsBySubject[selectedSubject.id]
+    : undefined;
+  const counts = useMemo(
+    () => ({
+      attended:
+        selectedStats?.attended ?? selectedSubject?.initial_present ?? 0,
+      held: selectedStats?.conducted ?? selectedSubject?.initial_total ?? 0,
+    }),
+    [
+      selectedStats?.attended,
+      selectedStats?.conducted,
+      selectedSubject?.initial_present,
+      selectedSubject?.initial_total,
+    ]
+  );
+
+  return (
+    <Screen scroll edges={SIMULATOR_EDGES} contentContainerStyle={styles.content}>
+      <ContentFade loading={status === 'loading'} fallback={<SimulatorSkeleton />}>
+        {status === 'error' ? (
+          <ErrorState
+            message={error ?? 'Something went wrong. Try again.'}
+            onRetry={handleRetry}
+            style={styles.stateCard}
+          />
+        ) : !selectedSubject ? (
+          <EmptyState
+            icon="calculator-outline"
+            title="No subjects yet"
+            message="Add a subject before simulating upcoming classes."
+            actionLabel="Add a subject"
+            onAction={() => router.replace('/(tabs)/subjects')}
+            style={styles.stateCard}
+          />
+        ) : (
+          <View style={styles.content}>
+            <View style={styles.pickerSection}>
+              <AppText variant="label" tone="muted">
+                Subject
+              </AppText>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipRow}
+              >
+                {subjects.map((subject) => (
+                  <SubjectChip
+                    key={subject.id}
+                    id={subject.id}
+                    name={subject.name}
+                    isSelected={subject.id === selectedSubject.id}
+                    onSelect={handleSelectSubject}
+                  />
+                ))}
+              </ScrollView>
+            </View>
+
+            <FadeView transitionKey={selectedSubject.id}>
+              <WhatIfSimulator
+                key={selectedSubject.id}
+                subject={selectedSubject}
+                counts={counts}
+                slots={slots}
+              />
+            </FadeView>
+          </View>
+        )}
+      </ContentFade>
+    </Screen>
+  );
+}
