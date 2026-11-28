@@ -1,16 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { memo, useCallback, useRef, useState } from 'react';
+import { Pressable, View } from 'react-native';
 
+import { ModalFieldSkeleton } from '@/components/SkeletonLayouts';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { ModalFormLayout } from '@/components/ui/ModalFormLayout';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Screen } from '@/components/ui/Screen';
 import { Segmented, type SegmentedOption } from '@/components/ui/Segmented';
-import { Skeleton } from '@/components/ui/Skeleton';
 import { TimeField } from '@/components/ui/TimeField';
-import { useData } from '@/context/DataProvider';
+import { useDataActions, useDataState } from '@/context/DataProvider';
+import { useSnackbarActions } from '@/context/SnackbarProvider';
 import {
   getIsoWeekday,
   getTodayDateString,
@@ -19,8 +22,14 @@ import {
   SHORT_WEEKDAYS,
   timeStringToMinutes,
 } from '@/lib/dates';
-import { AppError, getFriendlyErrorMessage } from '@/lib/errors';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { getFriendlyErrorMessage } from '@/lib/errors';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import {
+  fontFamily,
+  radius,
+  spacing,
+  type ThemeColors,
+} from '@/theme/tokens';
 import { type TimetableSlot } from '@/types/db';
 
 const MODAL_EDGES = ['bottom', 'left', 'right'] as const;
@@ -34,6 +43,78 @@ const WEEKDAY_OPTIONS: readonly SegmentedOption<number>[] = SHORT_WEEKDAYS.map(
     accessibilityLabel: LONG_WEEKDAYS[index],
   })
 );
+
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.destructiveBg,
+    borderRadius: radius.control,
+    padding: spacing.md,
+  },
+  errorIcon: {
+    marginRight: spacing.sm,
+    marginTop: 1,
+  },
+  errorText: {
+    flex: 1,
+  },
+  section: {
+    gap: spacing.sm,
+  },
+  radioList: {
+    gap: spacing.sm,
+  },
+  radioRowContainer: {
+    borderRadius: radius.control,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+    overflow: 'hidden',
+  },
+  radioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 46,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  radioRowSelected: {
+    borderColor: colors.foreground,
+    backgroundColor: colors.muted,
+  },
+  radioIcon: {
+    marginRight: spacing.md,
+  },
+  radioText: {
+    flex: 1,
+  },
+  pressed: {
+    backgroundColor: colors.muted,
+  },
+  destructiveTextBtn: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.control,
+    overflow: 'hidden',
+  },
+  destructiveTextBtnPressed: {
+    backgroundColor: colors.destructiveBg,
+  },
+  destructiveTextLabel: {
+    fontFamily: fontFamily.medium,
+  },
+  missingContainer: {
+    paddingTop: spacing.xl,
+    gap: spacing.md,
+  },
+  missingButton: {
+    alignSelf: 'flex-start',
+  },
+}));
 
 function parseWeekdayParam(raw: string | undefined): number {
   if (raw) {
@@ -55,13 +136,70 @@ function addOneHour(timeStr: string): string {
   }
 }
 
+interface SubjectRadioRowProps {
+  id: string;
+  name: string;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: (subjectId: string) => void;
+}
+
+const SubjectRadioRow = memo(function SubjectRadioRow({
+  id,
+  name,
+  selected,
+  disabled,
+  onSelect,
+}: SubjectRadioRowProps) {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+
+  return (
+    <PressableScale
+      onPress={() => {
+        if (!disabled) {
+          onSelect(id);
+        }
+      }}
+      disabled={disabled}
+      scaleTo={0.985}
+      rippleColor={colors.rippleNeutral}
+      accessibilityRole="radio"
+      accessibilityLabel={name}
+      accessibilityState={{ selected, disabled }}
+      containerStyle={[
+        styles.radioRowContainer,
+        selected && styles.radioRowSelected,
+      ]}
+      style={({ pressed }) => [
+        styles.radioRow,
+        pressed && !disabled && styles.pressed,
+      ]}
+    >
+      <Ionicons
+        name={selected ? 'radio-button-on' : 'radio-button-off'}
+        size={20}
+        color={selected ? colors.foreground : colors.mutedForeground}
+        style={styles.radioIcon}
+      />
+      <AppText variant="body" numberOfLines={2} style={styles.radioText}>
+        {name}
+      </AppText>
+    </PressableScale>
+  );
+});
+
 interface SlotFormBodyProps {
   existingSlot?: TimetableSlot;
   defaultWeekday: number;
 }
 
 function SlotFormBody({ existingSlot, defaultWeekday }: SlotFormBodyProps) {
-  const { subjects, addSlot, updateSlot, deleteSlot } = useData();
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+  const { subjects } = useDataState();
+  const { addSlot, updateSlot, deleteSlot } = useDataActions();
+  const { showSnackbar } = useSnackbarActions();
   const isEditing = Boolean(existingSlot);
 
   const initialStart = existingSlot?.start_time ?? DEFAULT_START_TIME;
@@ -75,21 +213,31 @@ function SlotFormBody({ existingSlot, defaultWeekday }: SlotFormBodyProps) {
   );
   const [startTime, setStartTime] = useState(initialStart);
   const [endTime, setEndTime] = useState(initialEnd);
+  const [timeError, setTimeError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
 
   const busyRef = useRef(false);
   const endTouchedRef = useRef(Boolean(existingSlot?.end_time));
 
-  const subjectId = selectedSubjectId || (!isEditing ? (subjects[0]?.id ?? '') : '');
+  const subjectId =
+    selectedSubjectId || (!isEditing ? (subjects[0]?.id ?? '') : '');
   const busy = saving || deleting;
 
-  const clearError = () => {
-    if (formError) {
-      setFormError(null);
-    }
-  };
+  const clearError = useCallback(() => {
+    setFormError((prev) => (prev ? null : prev));
+    setTimeError((prev) => (prev ? null : prev));
+  }, []);
+
+  const handleSelectSubject = useCallback(
+    (nextId: string) => {
+      setSelectedSubjectId(nextId);
+      clearError();
+    },
+    [clearError]
+  );
 
   const handleStartTimeChange = (nextStart: string) => {
     setStartTime(nextStart);
@@ -116,12 +264,13 @@ function SlotFormBody({ existingSlot, defaultWeekday }: SlotFormBodyProps) {
     }
 
     if (timeStringToMinutes(endTime) <= timeStringToMinutes(startTime)) {
-      setFormError('End time must be later than start time.');
+      setTimeError('End time must be later than start time.');
       return;
     }
 
     busyRef.current = true;
     setSaving(true);
+    setTimeError(null);
     setFormError(null);
 
     try {
@@ -134,16 +283,17 @@ function SlotFormBody({ existingSlot, defaultWeekday }: SlotFormBodyProps) {
 
       if (existingSlot) {
         await updateSlot(existingSlot.id, input);
+        showSnackbar('Class saved.');
       } else {
         await addSlot(input);
+        showSnackbar('Class added.');
       }
 
       router.back();
     } catch (err) {
-      if (!(err instanceof AppError)) {
-        console.error('Save class failed:', err);
-      }
-      setFormError(getFriendlyErrorMessage(err));
+      const message = getFriendlyErrorMessage(err);
+      setFormError(message);
+      showSnackbar({ message, tone: 'error' });
     } finally {
       busyRef.current = false;
       setSaving(false);
@@ -161,12 +311,13 @@ function SlotFormBody({ existingSlot, defaultWeekday }: SlotFormBodyProps) {
 
     try {
       await deleteSlot(existingSlot.id);
+      setDeleteModalVisible(false);
+      showSnackbar('Class deleted.');
       router.back();
     } catch (err) {
-      if (!(err instanceof AppError)) {
-        console.error('Delete class failed:', err);
-      }
-      setFormError(getFriendlyErrorMessage(err));
+      const message = getFriendlyErrorMessage(err);
+      setFormError(message);
+      showSnackbar({ message, tone: 'error' });
     } finally {
       busyRef.current = false;
       setDeleting(false);
@@ -178,30 +329,30 @@ function SlotFormBody({ existingSlot, defaultWeekday }: SlotFormBodyProps) {
       return;
     }
 
-    Alert.alert(
-      'Delete class',
-      'Delete this class from your weekly timetable? Past attendance records stay saved.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            void handleDelete();
-          },
-        },
-      ]
-    );
+    setFormError(null);
+    setDeleteModalVisible(true);
   };
 
   return (
-    <Screen scroll edges={MODAL_EDGES} contentContainerStyle={styles.content}>
+    <ModalFormLayout
+      footer={
+        <Button
+          title="Save class"
+          onPress={() => {
+            void handleSave();
+          }}
+          loading={saving}
+          disabled={busy || subjects.length === 0}
+          fullWidth
+        />
+      }
+    >
       {formError ? (
         <View style={styles.errorBanner} accessibilityRole="alert">
           <Ionicons
             name="alert-circle-outline"
             size={18}
-            color={colors.danger}
+            color={colors.destructiveText}
             style={styles.errorIcon}
           />
           <AppText variant="caption" tone="danger" style={styles.errorText}>
@@ -219,48 +370,16 @@ function SlotFormBody({ existingSlot, defaultWeekday }: SlotFormBodyProps) {
           </AppText>
         ) : (
           <View style={styles.radioList} accessibilityRole="radiogroup">
-            {subjects.map((subject) => {
-              const selected = subject.id === subjectId;
-              return (
-                <PressableScale
-                  key={subject.id}
-                  onPress={() => {
-                    if (!busy) {
-                      setSelectedSubjectId(subject.id);
-                      clearError();
-                    }
-                  }}
-                  disabled={busy}
-                  scaleTo={0.985}
-                  rippleColor={colors.rippleNeutral}
-                  accessibilityRole="radio"
-                  accessibilityLabel={subject.name}
-                  accessibilityState={{ selected, disabled: busy }}
-                  containerStyle={[
-                    styles.radioRowContainer,
-                    selected && styles.radioRowSelected,
-                  ]}
-                  style={({ pressed }) => [
-                    styles.radioRow,
-                    pressed && !busy && styles.pressed,
-                  ]}
-                >
-                  <Ionicons
-                    name={selected ? 'radio-button-on' : 'radio-button-off'}
-                    size={20}
-                    color={selected ? colors.accent : colors.textMuted}
-                    style={styles.radioIcon}
-                  />
-                  <AppText
-                    variant="body"
-                    numberOfLines={2}
-                    style={styles.radioText}
-                  >
-                    {subject.name}
-                  </AppText>
-                </PressableScale>
-              );
-            })}
+            {subjects.map((subject) => (
+              <SubjectRadioRow
+                key={subject.id}
+                id={subject.id}
+                name={subject.name}
+                selected={subject.id === subjectId}
+                disabled={busy}
+                onSelect={handleSelectSubject}
+              />
+            ))}
           </View>
         )}
       </View>
@@ -286,46 +405,73 @@ function SlotFormBody({ existingSlot, defaultWeekday }: SlotFormBodyProps) {
         disabled={busy}
       />
 
-      <TimeField
-        label="Ends at"
-        value={endTime}
-        onChange={handleEndTimeChange}
-        disabled={busy}
-      />
-
-      <View style={styles.actions}>
-        <Button
-          title="Save class"
-          onPress={() => {
-            void handleSave();
-          }}
-          loading={saving}
-          disabled={busy || subjects.length === 0}
-          fullWidth
+      <View style={styles.section}>
+        <TimeField
+          label="Ends at"
+          value={endTime}
+          onChange={handleEndTimeChange}
+          disabled={busy}
         />
-        {isEditing ? (
-          <Button
-            title="Delete class"
-            variant="danger"
-            onPress={handleConfirmDelete}
-            loading={deleting}
-            disabled={busy}
-            fullWidth
-          />
+        {timeError ? (
+          <AppText variant="caption" tone="danger">
+            {timeError}
+          </AppText>
         ) : null}
       </View>
-    </Screen>
+
+      {isEditing ? (
+        <Pressable
+          onPress={handleConfirmDelete}
+          disabled={busy}
+          android_ripple={
+            !busy ? { color: colors.rippleNeutral, foreground: true } : undefined
+          }
+          accessibilityRole="button"
+          accessibilityLabel="Delete class"
+          style={({ pressed }) => [
+            styles.destructiveTextBtn,
+            pressed && !busy && styles.destructiveTextBtnPressed,
+          ]}
+        >
+          <AppText
+            variant="label"
+            tone="danger"
+            style={styles.destructiveTextLabel}
+          >
+            Delete class
+          </AppText>
+        </Pressable>
+      ) : null}
+
+      {existingSlot ? (
+        <ConfirmModal
+          visible={deleteModalVisible}
+          title="Delete class"
+          message="Delete this class from your weekly timetable? Past attendance records stay saved."
+          confirmLabel="Delete"
+          destructive
+          loading={deleting}
+          error={formError}
+          onCancel={() => setDeleteModalVisible(false)}
+          onConfirm={() => {
+            void handleDelete();
+          }}
+        />
+      ) : null}
+    </ModalFormLayout>
   );
 }
 
 export default function SlotFormScreen() {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
   const params = useLocalSearchParams<{ id?: string; weekday?: string }>();
   const slotId =
     typeof params.id === 'string' && params.id.length > 0
       ? params.id
       : undefined;
 
-  const { slots, status } = useData();
+  const { slots, status } = useDataState();
   const existingSlot = slotId
     ? slots.find((item) => item.id === slotId)
     : undefined;
@@ -338,15 +484,7 @@ export default function SlotFormScreen() {
         <Stack.Screen options={{ title }} />
         <View style={styles.missingContainer}>
           {status === 'loading' ? (
-            <View
-              accessible
-              accessibilityLabel="Loading class"
-              style={styles.skeletonGroup}
-            >
-              <Skeleton width="45%" height={18} />
-              <Skeleton width="100%" height={48} />
-              <Skeleton width="100%" height={48} />
-            </View>
+            <ModalFieldSkeleton rows={4} />
           ) : (
             <>
               <AppText variant="body" tone="muted">
@@ -376,72 +514,3 @@ export default function SlotFormScreen() {
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  content: {
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xxl,
-    gap: spacing.xl,
-  },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.dangerBg,
-    borderRadius: radius.control,
-    padding: spacing.md,
-  },
-  errorIcon: {
-    marginRight: spacing.sm,
-    marginTop: 1,
-  },
-  errorText: {
-    flex: 1,
-  },
-  section: {
-    gap: spacing.sm,
-  },
-  radioList: {
-    gap: spacing.sm,
-  },
-  radioRowContainer: {
-    borderRadius: radius.control,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    overflow: 'hidden',
-  },
-  radioRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 46,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  radioRowSelected: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accentSoft,
-  },
-  radioIcon: {
-    marginRight: spacing.md,
-  },
-  radioText: {
-    flex: 1,
-  },
-  pressed: {
-    backgroundColor: colors.surfacePressed,
-  },
-  actions: {
-    gap: spacing.md,
-    marginTop: spacing.sm,
-  },
-  missingContainer: {
-    paddingTop: spacing.xl,
-    gap: spacing.md,
-  },
-  skeletonGroup: {
-    gap: spacing.md,
-  },
-  missingButton: {
-    alignSelf: 'flex-start',
-  },
-});

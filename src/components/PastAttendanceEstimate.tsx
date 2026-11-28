@@ -1,17 +1,29 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { View } from 'react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { ContentFade } from '@/components/ui/ContentFade';
 import { DATE_FORMAT_ERROR, DateField } from '@/components/ui/DateField';
-import { Skeleton } from '@/components/ui/Skeleton';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { ModalFormLayout } from '@/components/ui/ModalFormLayout';
+import { ModalFieldSkeleton } from '@/components/SkeletonLayouts';
 import { TextField } from '@/components/ui/TextField';
-import { useData } from '@/context/DataProvider';
+import { useDataActions } from '@/context/DataProvider';
+import { useSnackbarActions } from '@/context/SnackbarProvider';
 import { fetchEarliestLogDate } from '@/data/logs';
-import { updateSubject as updateSubjectRecord } from '@/data/subjects';
 import { formatDisplayPercent } from '@/lib/attendance';
 import {
   addDays,
@@ -20,8 +32,9 @@ import {
   getTodayDateString,
   parseTypedDate,
 } from '@/lib/dates';
-import { AppError, getFriendlyErrorMessage } from '@/lib/errors';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { getFriendlyErrorMessage } from '@/lib/errors';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import { radius, spacing, type ThemeColors } from '@/theme/tokens';
 import { type Subject, type TimetableSlot } from '@/types/db';
 
 interface EstimateSubjectEntry {
@@ -34,7 +47,67 @@ export interface PastAttendanceEstimateProps {
   slots: readonly TimetableSlot[];
   busy: boolean;
   onBusyChange: (busy: boolean) => void;
+  header?: ReactNode;
 }
+
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
+  skeletonGroup: {
+    gap: spacing.md,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.destructiveBg,
+    borderRadius: radius.control,
+    padding: spacing.md,
+  },
+  errorIcon: {
+    marginRight: spacing.sm,
+    marginTop: 1,
+  },
+  errorText: {
+    flex: 1,
+  },
+  rangeCard: {
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  subjectList: {
+    gap: spacing.lg,
+  },
+  subjectCard: {
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  inputsRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  halfInput: {
+    flex: 1,
+  },
+  computedLine: {
+    fontVariant: ['tabular-nums'],
+  },
+  summaryCard: {
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  warningCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.warningBg,
+    borderRadius: radius.card,
+    padding: spacing.md,
+  },
+  warningIcon: {
+    marginRight: spacing.sm,
+    marginTop: 1,
+  },
+  warningText: {
+    flex: 1,
+  },
+}));
 
 function parseWholeNumber(raw: string): number | null {
   const trimmed = raw.trim();
@@ -76,13 +149,85 @@ function computeEstimatedHeldMap(
   return next;
 }
 
+interface EstimateSubjectCardProps {
+  subjectId: string;
+  subjectName: string;
+  heldText: string;
+  missedText: string;
+  busy: boolean;
+  onChangeEntry: (
+    subjectId: string,
+    patch: Partial<EstimateSubjectEntry>
+  ) => void;
+}
+
+const EstimateSubjectCard = memo(function EstimateSubjectCard({
+  subjectId,
+  subjectName,
+  heldText,
+  missedText,
+  busy,
+  onChangeEntry,
+}: EstimateSubjectCardProps) {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+
+  const held = parseWholeNumber(heldText);
+  const missed = parseWholeNumber(missedText);
+  const countsValid = held !== null && missed !== null && missed <= held;
+  const attended = countsValid ? held - missed : 0;
+  const percentText = countsValid
+    ? formatDisplayPercent(attended, held)
+    : formatDisplayPercent(0, 0);
+  const rowError =
+    held !== null && missed !== null && missed > held
+      ? 'Missed cannot be more than held.'
+      : undefined;
+
+  return (
+    <Card style={styles.subjectCard}>
+      <AppText variant="heading">{subjectName}</AppText>
+      <View style={styles.inputsRow}>
+        <TextField
+          label="Classes held (estimated)"
+          value={heldText}
+          onChangeText={(value) => onChangeEntry(subjectId, { heldText: value })}
+          keyboardType="number-pad"
+          maxLength={4}
+          editable={!busy}
+          containerStyle={styles.halfInput}
+        />
+        <TextField
+          label="Classes you missed"
+          value={missedText}
+          onChangeText={(value) =>
+            onChangeEntry(subjectId, { missedText: value })
+          }
+          keyboardType="number-pad"
+          maxLength={4}
+          error={rowError}
+          editable={!busy}
+          containerStyle={styles.halfInput}
+        />
+      </View>
+      <AppText variant="label" tone="muted" style={styles.computedLine}>
+        Attended: {attended}, Percentage: {percentText}
+      </AppText>
+    </Card>
+  );
+});
+
 export function PastAttendanceEstimate({
   subjects,
   slots,
   busy,
   onBusyChange,
+  header,
 }: PastAttendanceEstimateProps) {
-  const { reload } = useData();
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+  const { updateSubjectsStartingCounts } = useDataActions();
+  const { showSnackbar } = useSnackbarActions();
 
   const [earliestLoading, setEarliestLoading] = useState(true);
   const [earliestLogDate, setEarliestLogDate] = useState<string | null>(null);
@@ -93,15 +238,24 @@ export function PastAttendanceEstimate({
   >({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [replaceModalVisible, setReplaceModalVisible] = useState(false);
+
+  const [reloadTick, setReloadTick] = useState(0);
 
   const mountedRef = useRef(true);
   const savingRef = useRef(false);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    let cancelled = false;
+  const handleRetryEarliest = useCallback(() => {
+    setEarliestLoading(true);
+    setLoadError(null);
+    setReloadTick((prev) => prev + 1);
+  }, []);
 
-    const loadEarliest = async () => {
+  useEffect(() => {
+    let cancelled = false;
+    mountedRef.current = true;
+
+    const load = async () => {
       try {
         const earliest = await fetchEarliestLogDate();
         if (!cancelled && mountedRef.current) {
@@ -110,9 +264,6 @@ export function PastAttendanceEstimate({
         }
       } catch (err) {
         if (!cancelled && mountedRef.current) {
-          if (!(err instanceof AppError)) {
-            console.error('Fetch earliest log date failed:', err);
-          }
           setLoadError(getFriendlyErrorMessage(err));
         }
       } finally {
@@ -122,13 +273,13 @@ export function PastAttendanceEstimate({
       }
     };
 
-    void loadEarliest();
+    void load();
 
     return () => {
       cancelled = true;
       mountedRef.current = false;
     };
-  }, []);
+  }, [reloadTick]);
 
   const yesterday = addDays(getTodayDateString(), -1);
   const endDate = earliestLogDate
@@ -159,24 +310,22 @@ export function PastAttendanceEstimate({
     }
   };
 
-  const updateEntry = (
-    subjectId: string,
-    patch: Partial<EstimateSubjectEntry>
-  ) => {
-    if (formError) {
-      setFormError(null);
-    }
-    setEntriesBySubject((prev) => {
-      const current = prev[subjectId] ?? { heldText: '0', missedText: '0' };
-      return {
-        ...prev,
-        [subjectId]: {
-          ...current,
-          ...patch,
-        },
-      };
-    });
-  };
+  const updateEntry = useCallback(
+    (subjectId: string, patch: Partial<EstimateSubjectEntry>) => {
+      setFormError((prev) => (prev ? null : prev));
+      setEntriesBySubject((prev) => {
+        const current = prev[subjectId] ?? { heldText: '0', missedText: '0' };
+        return {
+          ...prev,
+          [subjectId]: {
+            ...current,
+            ...patch,
+          },
+        };
+      });
+    },
+    []
+  );
 
   const overallSummary = useMemo(() => {
     let totalAttended = 0;
@@ -214,9 +363,7 @@ export function PastAttendanceEstimate({
       const missed = parseWholeNumber(entry.missedText);
 
       if (held === null || missed === null) {
-        setFormError(
-          `Enter whole numbers for ${subject.name}.`
-        );
+        setFormError(`Enter whole numbers for ${subject.name}.`);
         return;
       }
       if (missed > held) {
@@ -239,22 +386,14 @@ export function PastAttendanceEstimate({
     setFormError(null);
 
     try {
-      await Promise.all(
-        parsedUpdates.map((item) =>
-          updateSubjectRecord(item.id, {
-            initial_present: item.attended,
-            initial_total: item.held,
-          })
-        )
-      );
-      await reload(true);
+      await updateSubjectsStartingCounts(parsedUpdates);
+      showSnackbar('Past attendance saved.');
       router.back();
     } catch (err) {
-      if (!(err instanceof AppError)) {
-        console.error('Save estimated past attendance failed:', err);
-      }
+      const message = getFriendlyErrorMessage(err);
+      showSnackbar({ message, tone: 'error' });
       if (mountedRef.current) {
-        setFormError(getFriendlyErrorMessage(err));
+        setFormError(message);
       }
     } finally {
       savingRef.current = false;
@@ -303,227 +442,135 @@ export function PastAttendanceEstimate({
     );
 
     if (hasExistingStartingCounts) {
-      Alert.alert(
-        'Replace starting counts',
-        'This replaces the starting counts you entered before.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Replace',
-            style: 'destructive',
-            onPress: () => {
-              void performSave();
-            },
-          },
-        ]
-      );
+      setReplaceModalVisible(true);
       return;
     }
 
     void performSave();
   };
 
-  if (earliestLoading) {
-    return (
-      <View
-        accessible
-        accessibilityLabel="Loading estimate settings"
-        style={styles.skeletonGroup}
-      >
-        <Skeleton width="100%" height={48} />
-        <Skeleton width="60%" height={18} />
-        <Skeleton width="100%" height={120} />
-      </View>
-    );
-  }
+  const footer = (
+    <Button
+      title="Save estimate"
+      onPress={handlePressSave}
+      loading={saving}
+      disabled={busy || earliestLoading || !hasValidRange}
+      fullWidth
+    />
+  );
 
   return (
-    <View style={styles.container}>
-      {loadError || formError ? (
-        <View style={styles.errorBanner} accessibilityRole="alert">
-          <Ionicons
-            name="alert-circle-outline"
-            size={18}
-            color={colors.danger}
-            style={styles.errorIcon}
+    <ModalFormLayout footer={footer}>
+      {header}
+
+      <ContentFade
+        loading={earliestLoading}
+        fallback={<ModalFieldSkeleton rows={3} />}
+        style={styles.skeletonGroup}
+      >
+        {loadError ? (
+          <ErrorState
+            message={loadError}
+            onRetry={handleRetryEarliest}
           />
-          <AppText variant="caption" tone="danger" style={styles.errorText}>
-            {formError ?? loadError}
-          </AppText>
-        </View>
-      ) : null}
+        ) : (
+          <>
+            {formError ? (
+              <View style={styles.errorBanner} accessibilityRole="alert">
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={18}
+                  color={colors.destructiveText}
+                  style={styles.errorIcon}
+                />
+                <AppText variant="caption" tone="danger" style={styles.errorText}>
+                  {formError}
+                </AppText>
+              </View>
+            ) : null}
 
-      <Card style={styles.rangeCard}>
-        <DateField
-          label="Semester start date"
-          value={startDateText}
-          onChangeText={handleStartDateChange}
-          error={startDateRangeError}
-          editable={!busy}
-        />
-        <AppText variant="caption" tone="muted">
-          Counting up to {endDateDisplay}
-        </AppText>
-      </Card>
-
-      {hasValidRange ? (
-        <>
-          <View style={styles.subjectList}>
-            {subjects.map((subject) => {
-              const entry = entriesBySubject[subject.id] ?? {
-                heldText: '0',
-                missedText: '0',
-              };
-              const held = parseWholeNumber(entry.heldText);
-              const missed = parseWholeNumber(entry.missedText);
-              const countsValid =
-                held !== null && missed !== null && missed <= held;
-              const attended = countsValid ? held - missed : 0;
-              const percentText = countsValid
-                ? formatDisplayPercent(attended, held)
-                : formatDisplayPercent(0, 0);
-              const rowError =
-                held !== null && missed !== null && missed > held
-                  ? 'Missed cannot be more than held.'
-                  : undefined;
-
-              return (
-                <Card key={subject.id} style={styles.subjectCard}>
-                  <AppText variant="heading" style={styles.subjectTitle}>
-                    {subject.name}
-                  </AppText>
-                  <View style={styles.inputsRow}>
-                    <TextField
-                      label="Classes held (estimated)"
-                      value={entry.heldText}
-                      onChangeText={(value) =>
-                        updateEntry(subject.id, { heldText: value })
-                      }
-                      keyboardType="number-pad"
-                      maxLength={4}
-                      editable={!busy}
-                      containerStyle={styles.halfInput}
-                    />
-                    <TextField
-                      label="Classes you missed"
-                      value={entry.missedText}
-                      onChangeText={(value) =>
-                        updateEntry(subject.id, { missedText: value })
-                      }
-                      keyboardType="number-pad"
-                      maxLength={4}
-                      error={rowError}
-                      editable={!busy}
-                      containerStyle={styles.halfInput}
-                    />
-                  </View>
-                  <AppText variant="label" tone="muted" style={styles.computedLine}>
-                    Attended: {attended}, Percentage: {percentText}
-                  </AppText>
-                </Card>
-              );
-            })}
-          </View>
-
-          <Card style={styles.summaryCard}>
-            <AppText variant="label">
-              Estimated overall: {overallSummary.attended} of{' '}
-              {overallSummary.held} ({overallSummary.percent})
-            </AppText>
+          <Card style={styles.rangeCard}>
+            <DateField
+              label="Semester start date"
+              value={startDateText}
+              onChangeText={handleStartDateChange}
+              error={startDateRangeError}
+              editable={!busy}
+            />
             <AppText variant="caption" tone="muted">
-              Compare this with your college portal. If it is far off, adjust
-              the missed numbers.
+              Counting up to {endDateDisplay}
             </AppText>
           </Card>
 
-          <View style={styles.warningCard}>
-            <Ionicons
-              name="warning-outline"
-              size={18}
-              color={colors.warn}
-              style={styles.warningIcon}
-            />
-            <AppText variant="caption" style={styles.warningText}>
-              This is an estimate. The timetable does not know about holidays or
-              cancelled classes, so edit the held number if it is wrong.
-            </AppText>
-          </View>
+          {hasValidRange ? (
+            <>
+              <View style={styles.subjectList}>
+                {subjects.map((subject) => {
+                  const entry = entriesBySubject[subject.id] ?? {
+                    heldText: '0',
+                    missedText: '0',
+                  };
+                  return (
+                    <EstimateSubjectCard
+                      key={subject.id}
+                      subjectId={subject.id}
+                      subjectName={subject.name}
+                      heldText={entry.heldText}
+                      missedText={entry.missedText}
+                      busy={busy}
+                      onChangeEntry={updateEntry}
+                    />
+                  );
+                })}
+              </View>
 
-          <Button
-            title="Save estimate"
-            onPress={handlePressSave}
+              <Card style={styles.summaryCard}>
+                <AppText variant="label">
+                  Estimated overall: {overallSummary.attended} of{' '}
+                  {overallSummary.held} ({overallSummary.percent})
+                </AppText>
+                <AppText variant="caption" tone="muted">
+                  Compare this with your college portal. If it is far off, adjust
+                  the missed numbers.
+                </AppText>
+              </Card>
+
+              <View style={styles.warningCard}>
+                <Ionicons
+                  name="warning-outline"
+                  size={18}
+                  color={colors.warningText}
+                  style={styles.warningIcon}
+                />
+                <AppText
+                  variant="caption"
+                  tone="warning"
+                  style={styles.warningText}
+                >
+                  This is an estimate. The timetable does not know about holidays or
+                  cancelled classes, so edit the held number if it is wrong.
+                </AppText>
+              </View>
+            </>
+          ) : null}
+
+          <ConfirmModal
+            visible={replaceModalVisible}
+            title="Replace starting counts"
+            message="This replaces the starting counts you entered before."
+            confirmLabel="Replace"
+            destructive
             loading={saving}
-            disabled={busy}
-            fullWidth
+            error={formError}
+            onCancel={() => setReplaceModalVisible(false)}
+            onConfirm={() => {
+              setReplaceModalVisible(false);
+              void performSave();
+            }}
           />
-        </>
-      ) : null}
-    </View>
+          </>
+        )}
+      </ContentFade>
+    </ModalFormLayout>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    gap: spacing.lg,
-  },
-  skeletonGroup: {
-    gap: spacing.md,
-  },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.dangerBg,
-    borderRadius: radius.control,
-    padding: spacing.md,
-  },
-  errorIcon: {
-    marginRight: spacing.sm,
-    marginTop: 1,
-  },
-  errorText: {
-    flex: 1,
-  },
-  rangeCard: {
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  subjectList: {
-    gap: spacing.md,
-  },
-  subjectCard: {
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  subjectTitle: {
-    fontSize: 16,
-  },
-  inputsRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  halfInput: {
-    flex: 1,
-  },
-  computedLine: {
-    fontVariant: ['tabular-nums'],
-  },
-  summaryCard: {
-    padding: spacing.md,
-    gap: spacing.xs,
-  },
-  warningCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.warnBg,
-    borderRadius: radius.card,
-    padding: spacing.md,
-  },
-  warningIcon: {
-    marginRight: spacing.sm,
-    marginTop: 1,
-  },
-  warningText: {
-    flex: 1,
-    color: colors.warn,
-  },
-});

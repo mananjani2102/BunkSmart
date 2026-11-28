@@ -1,22 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, router } from 'expo-router';
-import { useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { memo, type ReactNode, useCallback, useRef, useState } from 'react';
+import { View } from 'react-native';
 
 import { PastAttendanceEstimate } from '@/components/PastAttendanceEstimate';
+import { ModalFieldSkeleton } from '@/components/SkeletonLayouts';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { ModalFormLayout } from '@/components/ui/ModalFormLayout';
 import { Screen } from '@/components/ui/Screen';
 import { Segmented, type SegmentedOption } from '@/components/ui/Segmented';
-import { Skeleton } from '@/components/ui/Skeleton';
 import { TextField } from '@/components/ui/TextField';
-import { useData } from '@/context/DataProvider';
-import { updateSubject as updateSubjectRecord } from '@/data/subjects';
-import { AppError, getFriendlyErrorMessage } from '@/lib/errors';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { useDataActions, useDataState } from '@/context/DataProvider';
+import { useSnackbarActions } from '@/context/SnackbarProvider';
+import { getFriendlyErrorMessage } from '@/lib/errors';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import { radius, spacing, type ThemeColors } from '@/theme/tokens';
 import { type Subject } from '@/types/db';
 
 const MODAL_EDGES = ['bottom', 'left', 'right'] as const;
@@ -32,6 +34,48 @@ interface KnownCountsEntry {
   attendedText: string;
   heldText: string;
 }
+
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
+  content: {
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xxl,
+    gap: spacing.lg,
+  },
+  headerGroup: {
+    gap: spacing.lg,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.destructiveBg,
+    borderRadius: radius.control,
+    padding: spacing.md,
+  },
+  errorIcon: {
+    marginRight: spacing.sm,
+    marginTop: 1,
+  },
+  errorText: {
+    flex: 1,
+  },
+  subjectList: {
+    gap: spacing.lg,
+  },
+  subjectCard: {
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  inputsRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  halfInput: {
+    flex: 1,
+  },
+  helperText: {
+    lineHeight: 19,
+  },
+}));
 
 function parseWholeNumber(raw: string): number | null {
   const trimmed = raw.trim();
@@ -58,16 +102,79 @@ function buildInitialKnownMap(
   return map;
 }
 
+interface KnownSubjectCardProps {
+  subjectId: string;
+  subjectName: string;
+  attendedText: string;
+  heldText: string;
+  busy: boolean;
+  onChangeEntry: (subjectId: string, patch: Partial<KnownCountsEntry>) => void;
+}
+
+const KnownSubjectCard = memo(function KnownSubjectCard({
+  subjectId,
+  subjectName,
+  attendedText,
+  heldText,
+  busy,
+  onChangeEntry,
+}: KnownSubjectCardProps) {
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+  const attended = parseWholeNumber(attendedText);
+  const held = parseWholeNumber(heldText);
+  const rowError =
+    attended !== null && held !== null && attended > held
+      ? 'Attended cannot exceed held.'
+      : undefined;
+
+  return (
+    <Card style={styles.subjectCard}>
+      <AppText variant="heading">{subjectName}</AppText>
+      <View style={styles.inputsRow}>
+        <TextField
+          label="Classes attended"
+          value={attendedText}
+          onChangeText={(value) =>
+            onChangeEntry(subjectId, { attendedText: value })
+          }
+          keyboardType="number-pad"
+          maxLength={4}
+          error={rowError}
+          editable={!busy}
+          containerStyle={styles.halfInput}
+        />
+        <TextField
+          label="Classes held"
+          value={heldText}
+          onChangeText={(value) =>
+            onChangeEntry(subjectId, { heldText: value })
+          }
+          keyboardType="number-pad"
+          maxLength={4}
+          editable={!busy}
+          containerStyle={styles.halfInput}
+        />
+      </View>
+    </Card>
+  );
+});
+
 function KnownNumbersMethod({
   subjects,
   busy,
   onBusyChange,
+  header,
 }: {
   subjects: readonly Subject[];
   busy: boolean;
   onBusyChange: (busy: boolean) => void;
+  header: ReactNode;
 }) {
-  const { reload } = useData();
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+  const { updateSubjectsStartingCounts } = useDataActions();
+  const { showSnackbar } = useSnackbarActions();
   const [entriesBySubject, setEntriesBySubject] = useState<
     Record<string, KnownCountsEntry>
   >(() => buildInitialKnownMap(subjects));
@@ -75,24 +182,22 @@ function KnownNumbersMethod({
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
 
-  const updateEntry = (
-    subjectId: string,
-    patch: Partial<KnownCountsEntry>
-  ) => {
-    if (formError) {
-      setFormError(null);
-    }
-    setEntriesBySubject((prev) => {
-      const current = prev[subjectId] ?? { attendedText: '0', heldText: '0' };
-      return {
-        ...prev,
-        [subjectId]: {
-          ...current,
-          ...patch,
-        },
-      };
-    });
-  };
+  const updateEntry = useCallback(
+    (subjectId: string, patch: Partial<KnownCountsEntry>) => {
+      setFormError((prev) => (prev ? null : prev));
+      setEntriesBySubject((prev) => {
+        const current = prev[subjectId] ?? { attendedText: '0', heldText: '0' };
+        return {
+          ...prev,
+          [subjectId]: {
+            ...current,
+            ...patch,
+          },
+        };
+      });
+    },
+    []
+  );
 
   const handleSave = async () => {
     if (savingRef.current || busy) {
@@ -138,21 +243,13 @@ function KnownNumbersMethod({
     setFormError(null);
 
     try {
-      await Promise.all(
-        updates.map((item) =>
-          updateSubjectRecord(item.id, {
-            initial_present: item.attended,
-            initial_total: item.held,
-          })
-        )
-      );
-      await reload(true);
+      await updateSubjectsStartingCounts(updates);
+      showSnackbar('Past attendance saved.');
       router.back();
     } catch (err) {
-      if (!(err instanceof AppError)) {
-        console.error('Save known past attendance failed:', err);
-      }
-      setFormError(getFriendlyErrorMessage(err));
+      const message = getFriendlyErrorMessage(err);
+      setFormError(message);
+      showSnackbar({ message, tone: 'error' });
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -161,13 +258,27 @@ function KnownNumbersMethod({
   };
 
   return (
-    <View style={styles.methodContainer}>
+    <ModalFormLayout
+      footer={
+        <Button
+          title="Save"
+          onPress={() => {
+            void handleSave();
+          }}
+          loading={saving}
+          disabled={busy}
+          fullWidth
+        />
+      }
+    >
+      {header}
+
       {formError ? (
         <View style={styles.errorBanner} accessibilityRole="alert">
           <Ionicons
             name="alert-circle-outline"
             size={18}
-            color={colors.danger}
+            color={colors.destructiveText}
             style={styles.errorIcon}
           />
           <AppText variant="caption" tone="danger" style={styles.errorText}>
@@ -182,68 +293,33 @@ function KnownNumbersMethod({
             attendedText: String(subject.initial_present),
             heldText: String(subject.initial_total),
           };
-          const attended = parseWholeNumber(entry.attendedText);
-          const held = parseWholeNumber(entry.heldText);
-          const rowError =
-            attended !== null && held !== null && attended > held
-              ? 'Attended cannot exceed held.'
-              : undefined;
-
           return (
-            <Card key={subject.id} style={styles.subjectCard}>
-              <AppText variant="heading" style={styles.subjectTitle}>
-                {subject.name}
-              </AppText>
-              <View style={styles.inputsRow}>
-                <TextField
-                  label="Classes attended"
-                  value={entry.attendedText}
-                  onChangeText={(value) =>
-                    updateEntry(subject.id, { attendedText: value })
-                  }
-                  keyboardType="number-pad"
-                  maxLength={4}
-                  error={rowError}
-                  editable={!busy}
-                  containerStyle={styles.halfInput}
-                />
-                <TextField
-                  label="Classes held"
-                  value={entry.heldText}
-                  onChangeText={(value) =>
-                    updateEntry(subject.id, { heldText: value })
-                  }
-                  keyboardType="number-pad"
-                  maxLength={4}
-                  editable={!busy}
-                  containerStyle={styles.halfInput}
-                />
-              </View>
-            </Card>
+            <KnownSubjectCard
+              key={subject.id}
+              subjectId={subject.id}
+              subjectName={subject.name}
+              attendedText={entry.attendedText}
+              heldText={entry.heldText}
+              busy={busy}
+              onChangeEntry={updateEntry}
+            />
           );
         })}
       </View>
-
-      <Button
-        title="Save"
-        onPress={() => {
-          void handleSave();
-        }}
-        loading={saving}
-        disabled={busy}
-        fullWidth
-      />
 
       <AppText variant="caption" tone="muted" style={styles.helperText}>
         If you also added a college overall number, the overall uses that
         number, and these counts only change each subject&apos;s own percentage.
       </AppText>
-    </View>
+    </ModalFormLayout>
   );
 }
 
 export default function PastAttendanceScreen() {
-  const { status, error, subjects, slots, reload } = useData();
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+  const { status, error, subjects, slots } = useDataState();
+  const { reload } = useDataActions();
   const [method, setMethod] = useState<PastMethod>('known');
   const [busy, setBusy] = useState(false);
 
@@ -255,16 +331,7 @@ export default function PastAttendanceScreen() {
     return (
       <Screen scroll edges={MODAL_EDGES} contentContainerStyle={styles.content}>
         <Stack.Screen options={{ title: 'Past attendance' }} />
-        <View
-          accessible
-          accessibilityLabel="Loading past attendance"
-          style={styles.skeletonGroup}
-        >
-          <Skeleton width="90%" height={20} />
-          <Skeleton width="100%" height={46} />
-          <Skeleton width="100%" height={120} />
-          <Skeleton width="100%" height={120} />
-        </View>
+        <ModalFieldSkeleton rows={4} />
       </Screen>
     );
   }
@@ -276,7 +343,7 @@ export default function PastAttendanceScreen() {
         <ErrorState
           message={error ?? 'Something went wrong. Try again.'}
           onRetry={() => {
-            void reload();
+            void reload(true);
           }}
         />
       </Screen>
@@ -298,93 +365,42 @@ export default function PastAttendanceScreen() {
     );
   }
 
+  const header = (
+    <View style={styles.headerGroup}>
+      <AppText variant="body" tone="muted">
+        Optional. Skip this if you only want to count classes from now on.
+      </AppText>
+
+      <Segmented
+        options={METHOD_OPTIONS}
+        value={method}
+        onChange={setMethod}
+        disabled={busy}
+        compact
+      />
+    </View>
+  );
+
   return (
-    <KeyboardAvoidingView
-      style={styles.keyboardAvoiding}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <>
       <Stack.Screen options={{ title: 'Past attendance' }} />
-      <Screen scroll edges={MODAL_EDGES} contentContainerStyle={styles.content}>
-        <AppText variant="body" tone="muted">
-          Optional. Skip this if you only want to count classes from now on.
-        </AppText>
-
-        <Segmented
-          options={METHOD_OPTIONS}
-          value={method}
-          onChange={setMethod}
-          disabled={busy}
-          compact
+      {method === 'known' ? (
+        <KnownNumbersMethod
+          key={subjectsKey}
+          subjects={subjects}
+          busy={busy}
+          onBusyChange={setBusy}
+          header={header}
         />
-
-        {method === 'known' ? (
-          <KnownNumbersMethod
-            key={subjectsKey}
-            subjects={subjects}
-            busy={busy}
-            onBusyChange={setBusy}
-          />
-        ) : (
-          <PastAttendanceEstimate
-            subjects={subjects}
-            slots={slots}
-            busy={busy}
-            onBusyChange={setBusy}
-          />
-        )}
-      </Screen>
-    </KeyboardAvoidingView>
+      ) : (
+        <PastAttendanceEstimate
+          subjects={subjects}
+          slots={slots}
+          busy={busy}
+          onBusyChange={setBusy}
+          header={header}
+        />
+      )}
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  keyboardAvoiding: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  content: {
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xxl,
-    gap: spacing.lg,
-  },
-  skeletonGroup: {
-    gap: spacing.md,
-  },
-  methodContainer: {
-    gap: spacing.lg,
-  },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.dangerBg,
-    borderRadius: radius.control,
-    padding: spacing.md,
-  },
-  errorIcon: {
-    marginRight: spacing.sm,
-    marginTop: 1,
-  },
-  errorText: {
-    flex: 1,
-  },
-  subjectList: {
-    gap: spacing.md,
-  },
-  subjectCard: {
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  subjectTitle: {
-    fontSize: 16,
-  },
-  inputsRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  halfInput: {
-    flex: 1,
-  },
-  helperText: {
-    lineHeight: 19,
-  },
-});
