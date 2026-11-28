@@ -33,7 +33,9 @@ Example: with 18 attended out of 22 held classes and a 75 percent target, `100 *
 - Subject detail view with skip or recovery guidance, present/absent/cancelled totals, attendance trend chart, and filterable log history.
 - What-if simulator (both per-subject and standalone) to test skipping or attending upcoming classes before they happen.
 - Local class reminders scheduled on the device before scheduled timetable slots, with configurable lead time.
-- Profile settings for default target percentage, Privacy Policy and Terms and Conditions, and deleting all attendance data.
+- Profile settings for default target percentage, appearance mode (system, light, or dark), Privacy Policy and Terms and Conditions, and deleting all attendance data.
+- Monochrome light (`#FCFCFC`) and dark (`#000000`) themes following system appearance by default, rendered with the Geist font family (`Geist-Regular`, `Geist-Medium`, `Geist-SemiBold`).
+- Fast local-first feedback with a shared-driver skeleton loader (shown only after 200 ms), undoable snackbar notifications for class and whole-day actions, and targeted haptic feedback on supported devices.
 
 ## Tech stack
 
@@ -49,16 +51,18 @@ Example: with 18 attended out of 22 held classes and a 75 percent target, `100 *
 ```text
 app.json                  Expo app configuration
 eas.json                  EAS Build profile for Android APK
+metro.config.js           Metro bundler configuration
 supabase/schema.sql       Postgres tables, view, trigger, and RLS policies
 scripts/                  Math verification and repository audit scripts
-docs/                     Project rules, data model, and architecture notes
+docs/                     Project rules, data model, theme, performance, and architecture notes
+assets/fonts/             Bundled Geist static font files (Regular, Medium, SemiBold)
 src/app/                  Expo Router screens and layouts
-src/components/           Feature components and reusable UI primitives
+src/components/           Feature components, skeleton layouts, and UI primitives
 src/constants/            In-app Privacy Policy and Terms copy
-src/context/              Auth, data, and reminder providers
+src/context/              Auth, data, reminder, and snackbar providers
 src/data/                 Supabase query and mutation helpers
-src/lib/                  Attendance math, date helpers, error mapping, reminders
-src/theme/                Color, spacing, radius, and typography tokens
+src/lib/                  Attendance math, date helpers, error mapping, haptics, motion, reminders
+src/theme/                Color, spacing, radius, navigation, and typography tokens
 src/types/                Database and asset TypeScript types
 ```
 
@@ -81,6 +85,10 @@ src/types/                Database and asset TypeScript types
    ```
 
 7. Open the app in Expo Go (SDK 58).
+
+Notes:
+- Appearance follows your device theme (`system`) by default, and can be switched between **System**, **Light**, and **Dark** in **Profile**.
+- Typography uses the Geist font files bundled in `assets/fonts/` under its open license, loaded at startup with `expo-font`.
 
 ## Build the APK
 

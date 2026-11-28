@@ -18,17 +18,30 @@
 
 ## Design Rules
 
-- Light theme only. Use colors only from `src/theme/tokens.ts`.
-- One accent color (teal). No purple, violet, or indigo. No gradients anywhere.
-- Radii: cards 14, controls 10. No radius above 16 on any button. No pill-shaped or fully rounded buttons.
+- Monochrome theme from `src/theme/tokens.ts` supporting light (`#FCFCFC` background) and dark (`#000000` background) modes, following system appearance by default.
+- No gradients anywhere. Use 1px `border` tokens on cards and rows instead of elevation shadows; soft shadows are allowed only on floating surfaces such as modals, bottom sheets, and snackbars.
+- Radii: cards and controls `8`, small badges `6`, and round (`999`) only for small status dots. No pill-shaped buttons.
 - Icons: Ionicons only. No emoji anywhere in UI, code, comments, or docs.
-- System font only.
-- Motion: only a 150 to 200 ms opacity or layout change on state change, plus the skeleton pulse. No looping, parallax, or scroll-driven animation.
-- Copy is short, literal, and second person, and it states what the screen does. No exclamation marks. No marketing words such as seamless, effortless, unlock, supercharge, or journey. No em dash or en dash characters in any text, string, comment, or file. Use commas, colons, or periods.
+- Geist font only (`Geist-Regular`, `Geist-Medium`, `Geist-SemiBold` loaded from `assets/fonts/`). Never use `fontWeight` on text styles; map each variant to its `fontFamily` and keep letter spacing at `0`.
+- Status is indicated by a small dot plus a short text label. Percentage numbers always use `foreground`. Amber and destructive fills are used only for dots, bars, and tinted backgrounds, while small text labels use `warningText` and `destructiveText`.
+- Copy is short, literal, and second person, using a single clear wording for each fact. No exclamation marks. No marketing words such as seamless, effortless, unlock, supercharge, or journey. No em dash or en dash characters in any text, string, comment, or file. Use commas, colons, or periods.
 - No fake data: no sample subjects, testimonials, user counts, ratings, or statistics. Every number on screen comes from the user's own data.
-- No stock photos or generated images. The app has no photographs.
-- Touch targets must be at least 44 dp. Text contrast must be at least 4.5 to 1. Never show status by color alone; always include a text label.
+- No photographs, stock photos, or generated images. The app has no user avatars or photo uploads.
+- Minimum touch target size is 44 dp. Text contrast must be at least 4.5 to 1 in both light and dark modes.
 - Android is edge-to-edge, so use `react-native-safe-area-context` for insets.
+
+## Performance rules
+
+- Animate only opacity and transform, always with the native driver. Never animate layout, width, height, shadows or SVG props on the JS thread.
+- Use the navigator's built-in native transitions for screens and tabs. No custom JavaScript page transitions.
+- No staggered entrance animations and no animation on list mount.
+- Skeletons share one single pulse driver.
+- No shadows or elevation on list rows, use 1px borders instead. No blur, no gradients, no large images.
+- A mutation updates local state first and syncs in the background.
+- Loaded data is fresh for 30 seconds.
+- Memoize rows. Virtualize long lists. Never nest a virtualized list inside a ScrollView.
+- Respect the system reduce-motion setting.
+- Judge speed on a preview APK, never in Expo Go development mode.
 
 ## Code Rules
 
