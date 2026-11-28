@@ -3,7 +3,7 @@ import { type ComponentProps } from 'react';
 
 export const AUTHOR_NAME = 'Jani Manan';
 export const CONTACT_EMAIL = 'manan.jani.cg@gmail.com';
-export const LEGAL_LAST_UPDATED = '27 November 2026';
+export const LEGAL_LAST_UPDATED = '28 November 2026';
 
 export type LegalIconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -101,7 +101,7 @@ export const PRIVACY_POLICY: LegalDocumentContent = {
       heading: '5. Local Device Storage and Reminders',
       icon: 'phone-portrait-outline',
       paragraphs: [
-        'BunkSmart stores your active authentication session, cached attendance snapshot, class reminder preferences, and any optional profile photo you pick locally on your device.',
+        'BunkSmart stores your login session, the theme mode, reminder settings, and a cached copy of your profile, subjects, timetable, and attendance on your device for faster loading, all of which except the theme mode are removed when you log out.',
         'If you choose a profile photo from your photo library, it stays on your device only and is never uploaded to our servers.',
         'On Android and iOS, optional class reminders are scheduled locally on your device only. BunkSmart does not collect push notification tokens or send remote notifications.',
       ],

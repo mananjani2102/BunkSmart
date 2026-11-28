@@ -18,6 +18,7 @@ import {
   unwrapData,
   unwrapMaybeData,
 } from '@/lib/errors';
+import { clearUserStorage, getProfileCacheKey } from '@/lib/prefs';
 import { cancelAllClassReminders } from '@/lib/reminders';
 import { supabase } from '@/lib/supabase';
 import { type Profile } from '@/types/db';
@@ -207,7 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     const loadProfile = async () => {
-      const cacheKey = `bunksmart:profile:${userId}`;
+      const cacheKey = getProfileCacheKey(userId);
       try {
         const cached = await AsyncStorage.getItem(cacheKey);
         if (cached && !cancelled) {
@@ -290,9 +291,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(async (): Promise<void> => {
+    const currentUserId = userIdRef.current;
     try {
-      const [, authResult] = await Promise.allSettled([
+      const [, , authResult] = await Promise.allSettled([
         cancelAllClassReminders(),
+        clearUserStorage(currentUserId),
         supabase.auth.signOut(),
       ]);
 
@@ -350,7 +353,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (userIdRef.current === currentUserId) {
         setProfile(updated);
         void AsyncStorage.setItem(
-          `bunksmart:profile:${currentUserId}`,
+          getProfileCacheKey(currentUserId),
           JSON.stringify(updated)
         );
       }

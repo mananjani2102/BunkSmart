@@ -17,7 +17,13 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   minutesBefore: 10,
 };
 
-const THEME_MODE_STORAGE_KEY = 'bunksmart:theme-mode';
+export const THEME_MODE_STORAGE_KEY = 'bunksmart:theme-mode';
+const BUNKSMART_STORAGE_PREFIX = 'bunksmart:';
+const PROFILE_CACHE_PREFIX = 'bunksmart:profile:';
+const DATA_CACHE_PREFIX = 'bunksmart:data:';
+const REMINDERS_STORAGE_PREFIX = 'bunksmart:reminders:';
+const OVERVIEW_BASELINE_HINT_PREFIX =
+  'bunksmart:overview-baseline-hint-dismissed:';
 
 function isThemeMode(value: string | null): value is ThemeMode {
   return value === 'system' || value === 'light' || value === 'dark';
@@ -48,12 +54,20 @@ export async function writeThemeMode(mode: ThemeMode): Promise<void> {
   }
 }
 
+export function getProfileCacheKey(userId: string): string {
+  return `${PROFILE_CACHE_PREFIX}${userId}`;
+}
+
+export function getDataCacheKey(userId: string): string {
+  return `${DATA_CACHE_PREFIX}${userId}`;
+}
+
 function getReminderStorageKey(userId: string): string {
-  return `bunksmart:reminders:${userId}`;
+  return `${REMINDERS_STORAGE_PREFIX}${userId}`;
 }
 
 function getOverviewBaselineHintKey(userId: string): string {
-  return `bunksmart:overview-baseline-hint-dismissed:${userId}`;
+  return `${OVERVIEW_BASELINE_HINT_PREFIX}${userId}`;
 }
 
 function isReminderMinutes(value: unknown): value is ReminderMinutes {
@@ -147,5 +161,46 @@ export async function writeOverviewBaselineHintDismissed(
     );
   } catch {
     // Ignore storage write errors.
+  }
+}
+
+export async function clearUserStorage(userId?: string | null): Promise<void> {
+  if (typeof window === 'undefined' && Platform.OS === 'web') {
+    return;
+  }
+
+  const keysToRemove = new Set<string>();
+  if (userId) {
+    keysToRemove.add(getProfileCacheKey(userId));
+    keysToRemove.add(getDataCacheKey(userId));
+    keysToRemove.add(getReminderStorageKey(userId));
+    keysToRemove.add(getOverviewBaselineHintKey(userId));
+  }
+
+  try {
+    const allKeys = await AsyncStorage.getAllKeys();
+    for (const key of allKeys) {
+      if (
+        key.startsWith(BUNKSMART_STORAGE_PREFIX) &&
+        key !== THEME_MODE_STORAGE_KEY
+      ) {
+        keysToRemove.add(key);
+      }
+    }
+  } catch {
+    // Keep known user-scoped keys if enumerating all keys fails.
+  }
+
+  if (keysToRemove.size === 0) {
+    return;
+  }
+
+  const targetKeys = Array.from(keysToRemove);
+  try {
+    await AsyncStorage.multiRemove(targetKeys);
+  } catch {
+    await Promise.allSettled(
+      targetKeys.map((key) => AsyncStorage.removeItem(key))
+    );
   }
 }

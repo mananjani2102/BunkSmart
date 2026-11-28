@@ -1,4 +1,4 @@
--- BunkSmart schema. Run once on a fresh Supabase project.
+-- BunkSmart schema. Run this whole file once on a fresh Supabase project.
 
 -- Tables
 
@@ -141,3 +141,14 @@ grant select, insert, update on public.profiles to authenticated;
 grant select, insert, update, delete
   on public.subjects, public.timetable_slots, public.attendance_logs to authenticated;
 grant select on public.subject_stats to authenticated;
+
+-- Migration 2
+
+alter table public.profiles
+  add column if not exists baseline_attended integer not null default 0 check (baseline_attended >= 0),
+  add column if not exists baseline_held integer not null default 0 check (baseline_held >= 0),
+  add column if not exists baseline_date date;
+
+alter table public.profiles
+  add constraint profiles_baseline_valid check (baseline_attended <= baseline_held),
+  add constraint profiles_baseline_date_required check (baseline_held = 0 or baseline_date is not null);

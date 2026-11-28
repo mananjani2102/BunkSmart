@@ -48,6 +48,7 @@ import {
   type LogsAfterBaselineCounts,
   type OverallResult,
 } from '@/lib/overall';
+import { getDataCacheKey } from '@/lib/prefs';
 import { cancelAllClassReminders } from '@/lib/reminders';
 import {
   type AttendanceLog,
@@ -180,7 +181,6 @@ const DataDerivedContext = createContext<DataDerivedValue | null>(null);
 const DataDateLogsContext = createContext<DataDateLogsValue | null>(null);
 const DataActionsContext = createContext<DataActionsValue | null>(null);
 
-const DATA_CACHE_PREFIX = 'bunksmart:data:';
 const FRESHNESS_WINDOW_MS = 30_000;
 const STATS_REFRESH_DEBOUNCE_MS = 1200;
 const MAX_DATE_LOGS_CACHE = 7;
@@ -204,7 +204,7 @@ const EMPTY_BASELINE_LOGS: LogsAfterBaselineCounts = {
 
 async function readCachedData(userId: string): Promise<CachedData | null> {
   try {
-    const raw = await AsyncStorage.getItem(`${DATA_CACHE_PREFIX}${userId}`);
+    const raw = await AsyncStorage.getItem(getDataCacheKey(userId));
     if (!raw) return null;
     return JSON.parse(raw) as CachedData;
   } catch {
@@ -217,10 +217,7 @@ async function writeCachedData(
   data: CachedData
 ): Promise<void> {
   try {
-    await AsyncStorage.setItem(
-      `${DATA_CACHE_PREFIX}${userId}`,
-      JSON.stringify(data)
-    );
+    await AsyncStorage.setItem(getDataCacheKey(userId), JSON.stringify(data));
   } catch {
     // Ignore storage quota errors
   }
@@ -1991,7 +1988,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           : Promise.resolve(),
       ]);
       if (currentUserId) {
-        void AsyncStorage.removeItem(`${DATA_CACHE_PREFIX}${currentUserId}`);
+        void AsyncStorage.removeItem(getDataCacheKey(currentUserId));
       }
       const now = Date.now();
       dataFetchedAtRef.current = now;

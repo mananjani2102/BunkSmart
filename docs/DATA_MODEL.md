@@ -10,9 +10,9 @@ One row per signed-in user. Created automatically by a database trigger on sign 
 - `id`: uuid, equals the auth user id
 - `full_name`: text, max 80 characters
 - `default_target`: integer, 50 to 95, default 75
-- `baseline_attended`: integer, default 0 (college overall classes attended, counting classes up to and including `baseline_date`)
-- `baseline_held`: integer, default 0 (college overall classes held, counting classes up to and including `baseline_date`)
-- `baseline_date`: nullable date, `"YYYY-MM-DD"` (cutoff local calendar date up to and including which the college baseline counts classes)
+- `baseline_attended`: integer, not null, default 0, at least 0 and never above `baseline_held` (`profiles_baseline_valid`) (college overall classes attended, counting classes up to and including `baseline_date`)
+- `baseline_held`: integer, not null, default 0, at least 0 (college overall classes held, counting classes up to and including `baseline_date`)
+- `baseline_date`: nullable date, `"YYYY-MM-DD"`, required whenever `baseline_held` is above 0 (`profiles_baseline_date_required`) (cutoff local calendar date up to and including which the college baseline counts classes)
 - `created_at`: timestamp with time zone
 - `updated_at`: timestamp with time zone
 
