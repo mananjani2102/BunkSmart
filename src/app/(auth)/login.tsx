@@ -1,59 +1,99 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
-import { Link, useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  View,
-} from 'react-native';
-
-import appIcon from '@/assets/images/icon.png';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Keyboard, View, type TextInputInstance } from 'react-native';
 
 import { AppText } from '@/components/ui/AppText';
+import { AuthLayout } from '@/components/ui/AuthLayout';
 import { Button } from '@/components/ui/Button';
-import { Screen } from '@/components/ui/Screen';
+import { FormError } from '@/components/ui/FormError';
+import { LinkRow } from '@/components/ui/LinkRow';
 import { TextField } from '@/components/ui/TextField';
-import { useAuth } from '@/context/AuthProvider';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { useAuthActions } from '@/context/AuthProvider';
+import { getFriendlyErrorMessage } from '@/lib/errors';
+import { createThemedStyles, useTheme } from '@/theme/ThemeProvider';
+import { radius, spacing, type ThemeColors } from '@/theme/tokens';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const AUTH_SCREEN_EDGES = ['top', 'bottom', 'left', 'right'] as const;
 
 interface LoginErrors {
   email?: string;
   password?: string;
 }
 
-function validateLogin(email: string, password: string): LoginErrors {
-  const errors: LoginErrors = {};
-  const trimmedEmail = email.trim();
-
-  if (!trimmedEmail) {
-    errors.email = 'Enter your email address.';
-  } else if (!EMAIL_PATTERN.test(trimmedEmail)) {
-    errors.email = 'Enter a valid email address.';
+function validateEmail(value: string): string | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return 'Enter your email address.';
   }
-
-  if (password.length < 8) {
-    errors.password = 'Password must be at least 8 characters.';
+  if (!EMAIL_PATTERN.test(normalized)) {
+    return 'Enter a valid email address.';
   }
-
-  return errors;
+  return undefined;
 }
 
+function validatePassword(value: string): string | undefined {
+  if (value.length === 0) {
+    return 'Enter your password.';
+  }
+  return undefined;
+}
+
+const getStyles = createThemedStyles((colors: ThemeColors) => ({
+  header: {
+    gap: spacing.xs,
+    marginBottom: spacing.xl,
+  },
+  noticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.successBg,
+    borderRadius: radius.control,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  bannerIcon: {
+    marginTop: 1,
+  },
+  bannerText: {
+    flex: 1,
+  },
+  formError: {
+    marginBottom: spacing.lg,
+  },
+  form: {
+    gap: spacing.lg,
+  },
+  submitButton: {
+    height: 48,
+    marginTop: spacing.xs,
+  },
+}));
+
 export default function LoginScreen() {
-  const { signIn } = useAuth();
+  const { colors, scheme } = useTheme();
+  const styles = getStyles(colors, scheme);
+  const { signIn } = useAuthActions();
   const params = useLocalSearchParams<{ notice?: string }>();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<LoginErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [dismissNotice, setDismissNotice] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
   const submittingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const passwordInputRef = useRef<TextInputInstance>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const showConfirmationNotice =
     !dismissNotice && params.notice === 'confirm_email';
@@ -78,216 +118,168 @@ export default function LoginScreen() {
     }
   };
 
+  const handleEmailBlur = () => {
+    if (submittingRef.current) {
+      return;
+    }
+    const emailError = validateEmail(email);
+    setFieldErrors((prev) =>
+      prev.email === emailError ? prev : { ...prev, email: emailError }
+    );
+  };
+
+  const handlePasswordBlur = () => {
+    if (submittingRef.current) {
+      return;
+    }
+    const passwordError = validatePassword(password);
+    setFieldErrors((prev) =>
+      prev.password === passwordError ? prev : { ...prev, password: passwordError }
+    );
+  };
+
+  const handleFocusPassword = () => {
+    passwordInputRef.current?.focus();
+  };
+
   const handleSubmit = async () => {
     if (submittingRef.current) {
       return;
     }
 
-    const errors = validateLogin(email, password);
-    setFieldErrors(errors);
+    const emailError = validateEmail(email);
+    const passwordError = validatePassword(password);
+    setFieldErrors({ email: emailError, password: passwordError });
     setFormError(null);
 
-    if (errors.email || errors.password) {
+    if (emailError || passwordError) {
       return;
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
     submittingRef.current = true;
     setSubmitting(true);
     setDismissNotice(true);
 
     try {
-      const result = await signIn(email, password);
-      if (result.error) {
+      const result = await signIn(normalizedEmail, password);
+      if (mountedRef.current && result.error) {
         setFormError(result.error);
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setFormError(getFriendlyErrorMessage(err));
       }
     } finally {
       submittingRef.current = false;
-      setSubmitting(false);
+      if (mountedRef.current) {
+        setSubmitting(false);
+      }
     }
   };
 
+  const handleCreateAccount = useCallback(() => {
+    if (submittingRef.current) {
+      return;
+    }
+    Keyboard.dismiss();
+    router.push('/(auth)/signup');
+  }, []);
+
+  const footer = useMemo(
+    () => (
+      <LinkRow
+        prompt="New to BunkSmart?"
+        actionLabel="Create an account"
+        onPress={handleCreateAccount}
+        disabled={submitting}
+      />
+    ),
+    [handleCreateAccount, submitting]
+  );
+
   return (
-    <KeyboardAvoidingView
-      style={styles.keyboardAvoiding}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <Screen
-        scroll
-        edges={AUTH_SCREEN_EDGES}
-        contentContainerStyle={styles.screenContent}
-      >
-        <View style={styles.header}>
-          <Image
-            source={appIcon}
-            style={styles.logo}
-            contentFit="cover"
-            accessibilityLabel="BunkSmart logo"
+    <AuthLayout footer={footer}>
+      <View style={styles.header}>
+        <AppText variant="title" accessibilityRole="header">
+          Welcome back
+        </AppText>
+        <AppText variant="body" tone="muted">
+          Log in to see your attendance and skip limits.
+        </AppText>
+      </View>
+
+      {showConfirmationNotice ? (
+        <View style={styles.noticeBanner} accessibilityRole="text">
+          <Ionicons
+            name="checkmark-circle-outline"
+            size={18}
+            color={colors.success}
+            style={styles.bannerIcon}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
           />
-          <AppText variant="title">Log in</AppText>
-          <AppText variant="body" tone="muted" style={styles.subtitle}>
-            Your subjects and attendance sync across your devices.
+          <AppText variant="label" tone="success" style={styles.bannerText}>
+            Account created. Confirm your email address, then log in.
           </AppText>
         </View>
+      ) : null}
 
-        {showConfirmationNotice ? (
-          <View style={styles.noticeBanner} accessibilityRole="text">
-            <Ionicons
-              name="checkmark-circle-outline"
-              size={18}
-              color={colors.safe}
-              style={styles.bannerIcon}
-            />
-            <AppText variant="caption" tone="safe" style={styles.bannerText}>
-              Account created. Confirm your email address, then log in.
-            </AppText>
-          </View>
-        ) : null}
+      <FormError message={formError} style={styles.formError} />
 
-        {formError ? (
-          <View style={styles.errorBanner} accessibilityRole="alert">
-            <Ionicons
-              name="alert-circle-outline"
-              size={18}
-              color={colors.danger}
-              style={styles.bannerIcon}
-            />
-            <AppText variant="caption" tone="danger" style={styles.bannerText}>
-              {formError}
-            </AppText>
-          </View>
-        ) : null}
+      <View style={styles.form}>
+        <TextField
+          label="Email"
+          placeholder="you@example.com"
+          value={email}
+          onChangeText={handleEmailChange}
+          onBlur={handleEmailBlur}
+          error={fieldErrors.email}
+          editable={!submitting}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="username"
+          textContentType="username"
+          importantForAutofill="yes"
+          returnKeyType="next"
+          submitBehavior="submit"
+          onSubmitEditing={handleFocusPassword}
+        />
 
-        <View style={styles.form}>
-          <TextField
-            label="Email"
-            value={email}
-            onChangeText={handleEmailChange}
-            error={fieldErrors.email}
-            editable={!submitting}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoComplete="email"
-            textContentType="emailAddress"
-            returnKeyType="next"
-          />
+        <TextField
+          ref={passwordInputRef}
+          label="Password"
+          placeholder="Your password"
+          value={password}
+          onChangeText={handlePasswordChange}
+          onBlur={handlePasswordBlur}
+          error={fieldErrors.password}
+          editable={!submitting}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="current-password"
+          textContentType="password"
+          importantForAutofill="yes"
+          returnKeyType="done"
+          onSubmitEditing={() => {
+            void handleSubmit();
+          }}
+        />
 
-          <TextField
-            label="Password"
-            value={password}
-            onChangeText={handlePasswordChange}
-            error={fieldErrors.password}
-            editable={!submitting}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoComplete="password"
-            textContentType="password"
-            returnKeyType="done"
-            onSubmitEditing={() => {
-              void handleSubmit();
-            }}
-          />
-
-          <Button
-            title="Log in"
-            onPress={() => {
-              void handleSubmit();
-            }}
-            loading={submitting}
-            disabled={submitting}
-            fullWidth
-            style={styles.submitButton}
-          />
-        </View>
-
-        <View style={styles.footer}>
-          <Link href="/(auth)/signup" asChild>
-            <Pressable
-              disabled={submitting}
-              accessibilityRole="link"
-              style={({ pressed }) => [
-                styles.linkButton,
-                pressed && styles.linkPressed,
-              ]}
-            >
-              <AppText variant="label" style={styles.linkText}>
-                Create an account
-              </AppText>
-            </Pressable>
-          </Link>
-        </View>
-      </Screen>
-    </KeyboardAvoidingView>
+        <Button
+          title="Log in"
+          loadingLabel="Logging in"
+          onPress={() => {
+            void handleSubmit();
+          }}
+          loading={submitting}
+          disabled={submitting}
+          fullWidth
+          style={styles.submitButton}
+        />
+      </View>
+    </AuthLayout>
   );
 }
-
-const styles = StyleSheet.create({
-  keyboardAvoiding: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  screenContent: {
-    justifyContent: 'center',
-    paddingTop: spacing.xxl,
-    paddingBottom: spacing.xxl,
-  },
-  header: {
-    marginBottom: spacing.xl,
-  },
-  logo: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
-    marginBottom: spacing.md,
-  },
-  subtitle: {
-    marginTop: spacing.sm,
-  },
-  noticeBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.safeBg,
-    borderRadius: radius.control,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.dangerBg,
-    borderRadius: radius.control,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  bannerIcon: {
-    marginRight: spacing.sm,
-    marginTop: 1,
-  },
-  bannerText: {
-    flex: 1,
-  },
-  form: {
-    gap: spacing.lg,
-  },
-  submitButton: {
-    marginTop: spacing.sm,
-  },
-  footer: {
-    marginTop: spacing.xl,
-    alignItems: 'center',
-  },
-  linkButton: {
-    minHeight: 44,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.control,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  linkPressed: {
-    backgroundColor: colors.accentSoft,
-  },
-  linkText: {
-    color: colors.accent,
-  },
-});
